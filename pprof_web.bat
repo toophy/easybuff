@@ -1,0 +1,1 @@
+go tool pprof ./bin/easybufff.exe ./log/easybufff_prof.log

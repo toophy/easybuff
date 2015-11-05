@@ -1,0 +1,10 @@
+message ActorBase {
+  Name string
+  Age int8
+  Hp int24
+  Mp int32
+  Maxhp int24
+  Maxmp int32
+  Exp int48
+  MaxExp int56
+}
