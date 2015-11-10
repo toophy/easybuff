@@ -1,5 +1,6 @@
 
-message  ActorBase     1            角色基础信息 {
+-- 角色基础信息
+message  M2c_actorBase {
   Name   string        名称
   Age    int8          年龄
   Hp     int24         血量
@@ -10,6 +11,11 @@ message  ActorBase     1            角色基础信息 {
   MaxExp int56         最多经验值
 }
 
-enum BagMaxGrid        100          背包格子数量上限
-enum EquipMaxCount     20           当前装备上限
-enum SkillMaxCount     100          技能上限
+-- 背包格子数量上限
+enum BagMaxGrid        100          
+
+-- 当前装备上限
+enum EquipMaxCount     20
+
+-- 技能上限
+enum SkillMaxCount     100

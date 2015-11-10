@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -200,17 +199,15 @@ type EB_MsgMember struct {
 
 // 类型
 type EB_Base struct {
-	Name    string // 名称, 文件夹内, 所有文件中, 不得重名
-	Desc    string // 描述
-	Stop    bool   // 解释结束, 不允许再添加成员
-	File    string // 所在文件名, 便于后期输出
-	Comment string // 本单元注释
+	Name    string   // 名称, 文件夹内, 所有文件中, 不得重名
+	File    string   // 所在文件名, 便于后期输出
+	Comment []string // 本单元注释
 }
 
 // 消息定义
 type EB_Message struct {
 	EB_Base
-	Id      string
+	MsgId   string
 	Members map[string]*EB_MsgMember
 }
 
@@ -223,12 +220,15 @@ type EB_Enum struct {
 type EB_ParseTable struct {
 	Cells    map[string]interface{}
 	CurrCell string
+	Comment  []string
+	MsgId    string
 }
 
 func ParseToNewGolang(d string, fd string, f string) {
 	// 结构,枚举唯一
 	var table EB_ParseTable
 	table.Cells = make(map[string]interface{}, 1000)
+	table.Comment = make([]string, 20)
 
 	rows := strings.Split(d, "\n")
 
@@ -280,7 +280,12 @@ func ParseToNewGolang(d string, fd string, f string) {
 		switch table.Cells[key].(type) {
 		case *EB_Enum:
 			d := table.Cells[key].(*EB_Enum)
-			file.WriteString(fmt.Sprintf("const %s = %s // %s\n", d.Name, d.Value, d.Desc))
+			for k, _ := range d.Comment {
+				if len(d.Comment[k]) > 0 {
+					file.WriteString(fmt.Sprintf("// %s\n", d.Comment[k]))
+				}
+			}
+			file.WriteString(fmt.Sprintf("const %s = %s \n", d.Name, d.Value))
 		}
 	}
 
@@ -291,7 +296,17 @@ func ParseToNewGolang(d string, fd string, f string) {
 		switch table.Cells[key].(type) {
 		case *EB_Message:
 			d := table.Cells[key].(*EB_Message)
-			file.WriteString(fmt.Sprintf("// %s\n", d.Desc))
+
+			for k, _ := range d.Comment {
+				if len(d.Comment[k]) > 0 {
+					file.WriteString(fmt.Sprintf("// %s\n", d.Comment[k]))
+				}
+			}
+
+			if len(d.MsgId) > 0 {
+				file.WriteString(fmt.Sprintf("const %s_Id = %s\n", d.Name, d.MsgId))
+			}
+
 			file.WriteString(fmt.Sprintf("type %s struct {\n", d.Name))
 			// 循环, 顺序输出
 			// 按照字母顺序
@@ -330,11 +345,22 @@ func ParseToNewGolang(d string, fd string, f string) {
 													  `, m.Name, GetReadFunc("uint8"), m.Name, TypeToGolang(m.Type), m.Name, m.Name, m.Name))
 					}
 				} else {
-					file.WriteString(fmt.Sprintf(" t.%s = s.%s()\n", m.Name, fn))
+					if len(m.Range) <= 0 {
+						file.WriteString(fmt.Sprintf(" t.%s = s.%s()\n", m.Name, fn))
+					} else {
+						file.WriteString(fmt.Sprintf(`
+													  len_%s := int(s.%s())
+													  t.%s = make([]%s,len_%s)
+													  for i:=0;i<len_%s;i++ {
+													  	 t.%s = s.%s()
+													  }
+													  
+													  `, m.Name, GetReadFunc("uint8"), m.Name, TypeToGolang(m.Type), m.Name, m.Name, m.Name, fn))
+					}
 				}
 			}
 
-			file.WriteString("}\n")
+			file.WriteString("}\n\n")
 
 			// write
 			file.WriteString(fmt.Sprintf("func (t *%s) Write(s *Stream) {\n", d.Name))
@@ -346,8 +372,17 @@ func ParseToNewGolang(d string, fd string, f string) {
 					if len(m.Range) <= 0 {
 						file.WriteString(fmt.Sprintf(" t.%s.Write(s)", m.Name))
 					} else {
-						rg, err := strconv.ParseInt(m.Range, 10, 32)
-						if err != nil {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							file.WriteString(fmt.Sprintf(`
+														  s.%s(uint8(len(t.%s)))
+														  for k,_ := range t.%s {
+														  	t.%s[k].Write(s)
+														  }
+														  
+														  `, GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
+
+						} else {
 							// 枚举
 							file.WriteString(fmt.Sprintf(`
 														  s.%s(uint8(%s))
@@ -357,35 +392,65 @@ func ParseToNewGolang(d string, fd string, f string) {
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, m.Name))
-						} else if rg <= 0 {
+						}
+					}
+				} else if m.Type == "string" {
+
+					if len(m.Range) <= 0 {
+						file.WriteString(fmt.Sprintf(" s.%s(&t.%s)\n", fn, m.Name))
+					} else {
+						if m.Range == "--ArrayLen" {
 							// 自动范围
 							file.WriteString(fmt.Sprintf(`
 														  s.%s(uint8(len(t.%s)))
 														  for k,_ := range t.%s {
-														  	t.%s[k].Write(s)
+														  	s.%s(&t.%s[i])
 														  }
 														  
-														  `, GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
+														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
+
 						} else {
-							// 限定范围(数值)
+							// 枚举
 							file.WriteString(fmt.Sprintf(`
-								  						  len_%s := len(t.%s)
 														  s.%s(uint8(%s))
+														  len_%s := len(t.%s)
 														  for i:=0; i<%s && i<len_%s; i++ {
-														  	t.%s[i].Write(s)
+														  	s.%s(&t.%s[i])
 														  }
 														  
-														  `, m.Name, m.Name, GetWriteFunc("uint8"), m.Range, m.Name, m.Name))
+														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
 						}
 					}
-				} else if m.Type == "string" {
-					file.WriteString(fmt.Sprintf(" s.%s(&t.%s)\n", fn, m.Name))
 				} else {
-					file.WriteString(fmt.Sprintf(" s.%s(t.%s)\n", fn, m.Name))
+					if len(m.Range) <= 0 {
+						file.WriteString(fmt.Sprintf(" s.%s(t.%s)\n", fn, m.Name))
+					} else {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							file.WriteString(fmt.Sprintf(`
+														  s.%s(uint8(len(t.%s)))
+														  for k,_ := range t.%s {
+														  	s.%s(t.%s[i])
+														  }
+														  
+														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
+
+						} else {
+							// 枚举
+							file.WriteString(fmt.Sprintf(`
+														  s.%s(uint8(%s))
+														  len_%s := len(t.%s)
+														  for i:=0; i<%s && i<len_%s; i++ {
+														  	s.%s(t.%s[i])
+														  }
+														  
+														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
+						}
+					}
 				}
 			}
 
-			file.WriteString("}\n\n")
+			file.WriteString("}\n\n\n")
 		}
 	}
 
@@ -426,32 +491,19 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 		return
 	}
 
-	// mesasge  ActorBase     1            角色基础信息 {
-
 	// message
 	switch m[0] {
 	case "message":
-		if lens < 4 {
+		if lens < 2 {
 			panic("文件格式错误 : message 行错误 [" + r3 + "]")
 		}
 
-		// 正常是 5 个元素
-		// 如果是 4 个元素, id 就存在
-		// message name desc {
-		// 必须存在
+		// message name id {
 		t := &EB_Message{}
 		t.Name = m[1]
-		t.Stop = false
 
-		if lens < 5 {
-			t.Desc = m[2]
-		} else {
-			if len(table.CurrCell) > 0 {
-				panic("文件格式错误 : message [" + table.CurrCell + "]还没有结束定义.")
-			}
-
-			t.Id = m[2]
-			t.Desc = m[3]
+		if len(table.CurrCell) > 0 {
+			panic("文件格式错误 : message [" + table.CurrCell + "]还没有结束定义.")
 		}
 
 		if _, ok := table.Cells[t.Name]; ok {
@@ -460,19 +512,29 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 
 		table.CurrCell = t.Name
 		table.Cells[table.CurrCell] = t
+		t.Comment = make([]string, 10)
+		if len(table.Comment) > 0 {
+			for k, _ := range table.Comment {
+				if len(table.Comment[k]) > 0 {
+					t.Comment = append(t.Comment, table.Comment[k])
+				}
+			}
+			table.Comment = table.Comment[0:0]
+		}
+
+		t.MsgId = table.MsgId
+		table.MsgId = ""
 
 		t.Members = make(map[string]*EB_MsgMember, 10)
 
 	case "enum":
-		if lens < 4 {
+		if lens < 3 {
 			panic("文件格式错误 : enum 行错误 [" + r3 + "]")
 		}
 
 		t := &EB_Enum{}
-		t.Stop = true
 		t.Name = m[1]
 		t.Value = m[2]
-		t.Desc = m[3]
 
 		if _, ok := table.Cells[t.Name]; ok {
 			panic("文件内容错误 : enum 重名 [" + r3 + "]")
@@ -480,16 +542,34 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 
 		table.Cells[t.Name] = t
 
+		t.Comment = make([]string, 10)
+		if len(table.Comment) > 0 {
+			for k, _ := range table.Comment {
+				if len(table.Comment[k]) > 0 {
+					t.Comment = append(t.Comment, table.Comment[k])
+				}
+			}
+			table.Comment = table.Comment[0:0]
+		}
+
 	case "}":
 		// message 结束符号
 		if len(table.CurrCell) == 0 {
 			panic("文件格式错误 : 多余的结束符 } .")
 		}
-		table.Cells[table.CurrCell].(*EB_Message).Stop = true
 		table.CurrCell = ""
 
 	case "--":
 		// 注释行, 本行注释, 作用给下一行
+		if lens > 1 {
+			table.Comment = append(table.Comment, m[1])
+		}
+
+	case "id":
+		// 消息ID
+		if lens > 1 {
+			table.MsgId = m[1]
+		}
 
 	default:
 		if lens < 3 {
@@ -501,11 +581,20 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 		mb := &EB_MsgMember{}
 		mb.Name = m[0]
 		mb.Type = m[1]
-		if lens == 3 {
-			mb.Desc = m[2]
-		} else {
-			mb.Range = m[2]
-			mb.Desc = m[3]
+		mb.Desc = m[2]
+
+		// Range
+		// [1]Type
+		if strings.Contains(mb.Type, "]") {
+			mn := strings.Split(mb.Type, "]")
+			if len(mn) > 1 {
+				mb.Type = mn[1]
+				if len(mn[0]) > 1 {
+					mb.Range = mn[0][1:]
+				} else {
+					mb.Range = "--ArrayLen"
+				}
+			}
 		}
 
 		if _, ok := table.Cells[table.CurrCell].(*EB_Message).Members[mb.Name]; ok {
