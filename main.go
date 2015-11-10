@@ -59,7 +59,7 @@ func main() {
 
 			switch *g_Language {
 			case "go":
-				proto.ParseToGolang(string(fd), *g_Target, k+".go")
+				proto.ParseToNewGolang(string(fd), *g_Target, k+".go")
 			case "cpp":
 				proto.ParseToCpplang(string(fd), *g_Target, k+".cpp")
 			}

@@ -1,10 +1,15 @@
-message ActorBase {
-  Name string
-  Age int8
-  Hp int24
-  Mp int32
-  Maxhp int24
-  Maxmp int32
-  Exp int48
-  MaxExp int56
+
+message  ActorBase     1            角色基础信息 {
+  Name   string        名称
+  Age    int8          年龄
+  Hp     int24         血量
+  Mp     int32         法力
+  Maxhp  int24         最大血量
+  Maxmp  int32         最大法力
+  Exp    int48         经验值
+  MaxExp int56         最多经验值
 }
+
+enum BagMaxGrid        100          背包格子数量上限
+enum EquipMaxCount     20           当前装备上限
+enum SkillMaxCount     100          技能上限

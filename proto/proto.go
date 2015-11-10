@@ -5,6 +5,7 @@ import (
 	"github.com/toophy/easybuff/help"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 )
 
@@ -91,7 +92,7 @@ func GetWriteFunc(s string) string {
 }
 
 func TypeToGolang(s string) string {
-	type_name := ""
+	type_name := s
 	switch s {
 	case "int8":
 		type_name = "int8"
@@ -132,7 +133,7 @@ func TypeToGolang(s string) string {
 }
 
 func TypeToClang(s string) string {
-	type_name := ""
+	type_name := s
 	switch s {
 	case "int8":
 		type_name = "char"
@@ -172,6 +173,300 @@ func TypeToClang(s string) string {
 	return type_name
 }
 
+// mesasge  ActorBase     1            角色基础信息 {
+//   Name   string        名称
+//   Age    int8          年龄
+//   Hp     int24         血量
+//   Mp     int32         法力
+//   Maxhp  int24         最大血量
+//   Maxmp  int32         最大法力
+//   Exp    int48         经验值
+//   MaxExp int56         最多经验值
+// }
+
+// enum BagMaxGrid        100          背包格子数量上限
+// enum EquipMaxCount     20           当前装备上限
+// enum SkillMaxCount     100          技能上限
+
+// 消息成员
+type EB_MsgMember struct {
+	Sort  int
+	Name  string
+	Type  string
+	Range string
+	Desc  string
+}
+
+// 类型
+type EB_Base struct {
+	Name    string // 名称, 文件夹内, 所有文件中, 不得重名
+	Desc    string // 描述
+	Stop    bool   // 解释结束, 不允许再添加成员
+	File    string // 所在文件名, 便于后期输出
+	Comment string // 本单元注释
+}
+
+// 消息定义
+type EB_Message struct {
+	EB_Base
+	Id      string
+	Members map[string]*EB_MsgMember
+}
+
+// 枚举
+type EB_Enum struct {
+	EB_Base
+	Value string
+}
+
+type EB_ParseTable struct {
+	Cells    map[string]interface{}
+	CurrCell string
+}
+
+func ParseToNewGolang(d string, fd string, f string) {
+	// 结构,枚举唯一
+	var table EB_ParseTable
+	table.Cells = make(map[string]interface{}, 1000)
+
+	rows := strings.Split(d, "\n")
+
+	for k, _ := range rows {
+		ParseToNewGolangRow(k, rows[k], &table)
+	}
+
+	// 写出代码
+
+	// 检查log目录
+	if !help.IsExist(fd) {
+		os.MkdirAll(fd, os.ModeDir)
+	}
+
+	if !help.IsExist(fd + f) {
+		os.Create(fd + f)
+	}
+	file, err := os.OpenFile(fd+f, os.O_RDWR, os.ModePerm)
+	if err != nil {
+		panic(err.Error())
+	}
+	// 文件头
+	file.WriteString(
+		`// easybuff
+		// 不要修改本文件, 每次消息有变动, 请手动生成本文件
+		// easybuff -s 描述文件目录 -o 目标文件目录 -l 语言(go,cpp)
+
+
+		package proto
+
+		import (
+			. "github.com/toophy/login/help"
+		)
+
+		`)
+
+	// 按照字母顺序
+	keys := make([]string, len(table.Cells))
+	i := 0
+	for key, _ := range table.Cells {
+		keys[i] = key
+		i++
+	}
+
+	sort.Sort(sort.StringSlice(keys))
+
+	for _, key := range keys {
+
+		switch table.Cells[key].(type) {
+		case *EB_Enum:
+			d := table.Cells[key].(*EB_Enum)
+			file.WriteString(fmt.Sprintf("const %s = %s // %s\n", d.Name, d.Value, d.Desc))
+		}
+	}
+
+	file.WriteString("\n\n")
+
+	for _, key := range keys {
+
+		switch table.Cells[key].(type) {
+		case *EB_Message:
+			d := table.Cells[key].(*EB_Message)
+			file.WriteString(fmt.Sprintf("// %s\n", d.Desc))
+			file.WriteString(fmt.Sprintf("type %s struct {\n", d.Name))
+			// 循环, 顺序输出
+			// 按照字母顺序
+			mbkeys := make([]string, len(d.Members))
+			for k, _ := range d.Members {
+				mbkeys[d.Members[k].Sort] = k
+			}
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				file.WriteString(fmt.Sprintf("%s %s // %s\n", m.Name, TypeToGolang(m.Type), m.Desc))
+			}
+
+			file.WriteString("}\n")
+
+			// read
+			file.WriteString(fmt.Sprintf("func (t *%s) Read(s *Stream) {\n", d.Name))
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetReadFunc(m.Type)
+				if fn == "" {
+					file.WriteString(fmt.Sprintf(" t.%s.Read(s) // %s\n", m.Name, m.Desc))
+				} else {
+					file.WriteString(fmt.Sprintf(" t.%s = s.%s() // %s\n", m.Name, fn, m.Desc))
+				}
+			}
+
+			file.WriteString("}\n")
+
+			// write
+			file.WriteString(fmt.Sprintf("func (t *%s) Write(s *Stream) {\n", d.Name))
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetWriteFunc(m.Type)
+				if fn == "" {
+					file.WriteString(fmt.Sprintf(" t.%s.Write(s) // %s\n", m.Name, m.Desc))
+				} else if m.Type == "string" {
+					file.WriteString(fmt.Sprintf(" s.%s(&t.%s) // %s\n", fn, m.Name, m.Desc))
+				} else {
+					file.WriteString(fmt.Sprintf(" s.%s(t.%s) // %s\n", fn, m.Name, m.Desc))
+				}
+			}
+
+			file.WriteString("}\n\n")
+		}
+	}
+
+	file.Close()
+
+	cmd_data := exec.Command("gofmt", "-w", fd+f)
+	err = cmd_data.Run()
+	if err != nil {
+		fmt.Println(fd + f + "," + err.Error())
+	}
+}
+
+func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
+
+	// 捕捉异常
+	defer func() {
+		if r := recover(); r != nil {
+			switch r.(type) {
+			case error:
+				println("ParseToNewGolangRow:" + r.(error).Error())
+			case string:
+				println("ParseToNewGolangRow:" + help.Utf82Gbk(r.(string)))
+			}
+		}
+	}()
+
+	// mesasge -- 规则解释, } 结束符
+	// enum    -- 规则解释, } 结束符
+
+	r1 := strings.Replace(d, "\t", " ", -1)
+	r2 := strings.Replace(r1, "\r\n", " ", -1)
+	r3 := strings.Replace(r2, "\n", " ", -1)
+
+	m := strings.Fields(r3)
+	lens := len(m)
+
+	if lens < 1 {
+		return
+	}
+
+	// mesasge  ActorBase     1            角色基础信息 {
+
+	// message
+	switch m[0] {
+	case "message":
+		if lens < 4 {
+			panic("文件格式错误 : message 行错误 [" + r3 + "]")
+		}
+
+		// 正常是 5 个元素
+		// 如果是 4 个元素, id 就存在
+		// message name desc {
+		// 必须存在
+		t := &EB_Message{}
+		t.Name = m[1]
+		t.Stop = false
+
+		if lens < 5 {
+			t.Desc = m[2]
+		} else {
+			if len(table.CurrCell) > 0 {
+				panic("文件格式错误 : message [" + table.CurrCell + "]还没有结束定义.")
+			}
+
+			t.Id = m[2]
+			t.Desc = m[3]
+		}
+
+		if _, ok := table.Cells[t.Name]; ok {
+			panic("文件内容错误 : message 重名 [" + r3 + "]")
+		}
+
+		table.CurrCell = t.Name
+		table.Cells[table.CurrCell] = t
+
+		t.Members = make(map[string]*EB_MsgMember, 10)
+
+	case "enum":
+		if lens < 4 {
+			panic("文件格式错误 : enum 行错误 [" + r3 + "]")
+		}
+
+		t := &EB_Enum{}
+		t.Stop = true
+		t.Name = m[1]
+		t.Value = m[2]
+		t.Desc = m[3]
+
+		if _, ok := table.Cells[t.Name]; ok {
+			panic("文件内容错误 : enum 重名 [" + r3 + "]")
+		}
+
+		table.Cells[t.Name] = t
+
+	case "}":
+		// message 结束符号
+		if len(table.CurrCell) == 0 {
+			panic("文件格式错误 : 多余的结束符 } .")
+		}
+		table.Cells[table.CurrCell].(*EB_Message).Stop = true
+		table.CurrCell = ""
+
+	case "--":
+		// 注释行, 本行注释, 作用给下一行
+
+	default:
+		if lens < 3 {
+			panic("文件格式错误 : member 行错误 [" + r3 + "]")
+		}
+		if len(table.CurrCell) == 0 {
+			panic("文件格式错误 : member 行错误 [" + r3 + "], 没有归属消息")
+		}
+		mb := &EB_MsgMember{}
+		mb.Name = m[0]
+		mb.Type = m[1]
+		if lens == 3 {
+			mb.Desc = m[2]
+		} else {
+			mb.Range = m[2]
+			mb.Desc = m[3]
+		}
+
+		if _, ok := table.Cells[table.CurrCell].(*EB_Message).Members[mb.Name]; ok {
+			panic("文件格式错误 : member 重名 [" + r3 + "] ")
+		}
+
+		mb.Sort = len(table.Cells[table.CurrCell].(*EB_Message).Members)
+
+		table.Cells[table.CurrCell].(*EB_Message).Members[mb.Name] = mb
+	}
+}
+
 func ParseToGolang(d string, fd string, f string) {
 
 	r1 := strings.Replace(d, "\t", " ", -1)
@@ -209,16 +504,28 @@ func ParseToGolang(d string, fd string, f string) {
 				}
 			}
 			flag = "name"
+
 		default:
 			switch flag {
+
 			case "name":
 				data_struct[data_count] += "type " + m[i] + " struct {\n"
 				data_read[data_count] += "func (this *" + m[i] + ") Read(s *Stream) {\n"
 				data_write[data_count] += "func (this *" + m[i] + ") Write(s *Stream) {\n"
+				flag = "msgId"
+
+			case "msgId":
+				data_struct[data_count] += "type " + m[i] + " struct {\n"
+				flag = "desc"
+
+			case "desc":
+				data_struct[data_count] += "// " + m[i] + "\n"
 				flag = "member"
+
 			case "member":
 				member = m[i]
 				flag = "type"
+
 			case "type":
 				if len(member) > 0 {
 					type_name := TypeToGolang(m[i])
@@ -321,7 +628,7 @@ func ParseToCpplang(d string, fd string, f string) {
 
 	for i := 0; i < lens; i++ {
 		switch m[i] {
-		case "message":
+		case "-message-":
 			switch flag {
 			case "key":
 			default:
@@ -334,17 +641,24 @@ func ParseToCpplang(d string, fd string, f string) {
 					data_write[data_count] = ""
 				}
 			}
-			flag = "name"
+			flag = "desc"
+
 		default:
 			switch flag {
+			case "desc":
+				data_struct[data_count] += "// " + m[i] + "\n"
+				flag = "name"
+
 			case "name":
 				data_struct[data_count] += "class " + m[i] + " {\n"
 				data_read[data_count] += "void " + m[i] + "::Read(s *Stream) {\n"
 				data_write[data_count] += "void " + m[i] + "::Write(s *Stream) {\n"
 				flag = "member"
+
 			case "member":
 				member = m[i]
 				flag = "type"
+
 			case "type":
 				if len(member) > 0 {
 					type_name := TypeToClang(m[i])
