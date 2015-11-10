@@ -14,3 +14,8 @@ message  M2c_actorBase2 {
 
 -- 消息ActorBase2的Ox数值上限
 enum	ActorBaseCount	10
+
+-- 心跳
+id 3
+message  M2c_heart {
+}
