@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -301,7 +302,11 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 			for _, v := range mbkeys {
 				m := d.Members[v]
-				file.WriteString(fmt.Sprintf("%s %s // %s\n", m.Name, TypeToGolang(m.Type), m.Desc))
+				if len(m.Range) <= 0 {
+					file.WriteString(fmt.Sprintf("%s %s // %s\n", m.Name, TypeToGolang(m.Type), m.Desc))
+				} else {
+					file.WriteString(fmt.Sprintf("%s []%s // %s\n", m.Name, TypeToGolang(m.Type), m.Desc))
+				}
 			}
 
 			file.WriteString("}\n")
@@ -312,9 +317,20 @@ func ParseToNewGolang(d string, fd string, f string) {
 				m := d.Members[v]
 				fn := GetReadFunc(m.Type)
 				if fn == "" {
-					file.WriteString(fmt.Sprintf(" t.%s.Read(s) // %s\n", m.Name, m.Desc))
+					if len(m.Range) <= 0 {
+						file.WriteString(fmt.Sprintf(" t.%s.Read(s)\n", m.Name))
+					} else {
+						file.WriteString(fmt.Sprintf(`
+													  len_%s := int(s.%s())
+													  t.%s = make([]%s,len_%s)
+													  for i:=0;i<len_%s;i++ {
+													  	t.%s[i].Read(s)
+													  }
+													  
+													  `, m.Name, GetReadFunc("uint8"), m.Name, TypeToGolang(m.Type), m.Name, m.Name, m.Name))
+					}
 				} else {
-					file.WriteString(fmt.Sprintf(" t.%s = s.%s() // %s\n", m.Name, fn, m.Desc))
+					file.WriteString(fmt.Sprintf(" t.%s = s.%s()\n", m.Name, fn))
 				}
 			}
 
@@ -326,11 +342,46 @@ func ParseToNewGolang(d string, fd string, f string) {
 				m := d.Members[v]
 				fn := GetWriteFunc(m.Type)
 				if fn == "" {
-					file.WriteString(fmt.Sprintf(" t.%s.Write(s) // %s\n", m.Name, m.Desc))
+
+					if len(m.Range) <= 0 {
+						file.WriteString(fmt.Sprintf(" t.%s.Write(s)", m.Name))
+					} else {
+						rg, err := strconv.ParseInt(m.Range, 10, 32)
+						if err != nil {
+							// 枚举
+							file.WriteString(fmt.Sprintf(`
+														  s.%s(uint8(%s))
+														  len_%s := len(t.%s)
+														  for i:=0; i<%s && i<len_%s; i++ {
+														  	t.%s[i].Write(s)
+														  }
+														  
+														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, m.Name))
+						} else if rg <= 0 {
+							// 自动范围
+							file.WriteString(fmt.Sprintf(`
+														  s.%s(uint8(len(t.%s)))
+														  for k,_ := range t.%s {
+														  	t.%s[k].Write(s)
+														  }
+														  
+														  `, GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
+						} else {
+							// 限定范围(数值)
+							file.WriteString(fmt.Sprintf(`
+								  						  len_%s := len(t.%s)
+														  s.%s(uint8(%s))
+														  for i:=0; i<%s && i<len_%s; i++ {
+														  	t.%s[i].Write(s)
+														  }
+														  
+														  `, m.Name, m.Name, GetWriteFunc("uint8"), m.Range, m.Name, m.Name))
+						}
+					}
 				} else if m.Type == "string" {
-					file.WriteString(fmt.Sprintf(" s.%s(&t.%s) // %s\n", fn, m.Name, m.Desc))
+					file.WriteString(fmt.Sprintf(" s.%s(&t.%s)\n", fn, m.Name))
 				} else {
-					file.WriteString(fmt.Sprintf(" s.%s(t.%s) // %s\n", fn, m.Name, m.Desc))
+					file.WriteString(fmt.Sprintf(" s.%s(t.%s)\n", fn, m.Name))
 				}
 			}
 

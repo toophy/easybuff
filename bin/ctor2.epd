@@ -1,10 +1,15 @@
 
-message  ActorBase2     2            角色基础信息hehe {
-  Name string 名称
-  Age int8 年龄
-  Hp int32 血量
-  Mp int32 法力
-  Maxhp int32 最大血量
-  Maxmp int32 最大法力
-  Ox ActorBase 基础属性
+--角色基础信息hehe
+message  ActorBase2     2 {
+  Name		string		名称
+  Age		int8		年龄
+  Hp		int32		血量
+  Mp		int32		法力
+  Maxhp		int32		最大血量
+  Maxmp		int32		最大法力
+  Ox		[]ActorBase	基础属性组
 }
+
+
+--消息ActorBase2的Ox数值上限
+enum	ActorBaseCount	10
