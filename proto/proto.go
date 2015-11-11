@@ -364,6 +364,15 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 			// write
 			file.WriteString(fmt.Sprintf("func (t *%s) Write(s *Stream) {\n", d.Name))
+			// write len, msg_id
+			// old_pos := s.GetPos()
+			// s.Seek(old_pos+help.MsgHeaderSize)
+			// ...
+			// last_pos := s.GetPos()
+			// s.Seek(old_pos)
+			// header := len<<16 | uint32(x_Id)
+			// s.WriteUint32(header)
+			// s.Seek(last_pos)
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				fn := GetWriteFunc(m.Type)

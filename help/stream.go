@@ -5,26 +5,85 @@ import (
 	"math"
 )
 
+const (
+	MsgHeaderSize    = 4
+	PacketHeaderSize = 4
+)
+
 type Stream struct {
-	Data   []byte
-	MaxLen uint64
-	Pos    uint64
+	Data       []byte // 数据流
+	MaxLen     uint64 // 数据流长度
+	CurrPos    uint64 // 当前最新位置
+	LastMsgPos uint64 // 最后一个完整写入的消息位置, LastMsgPos<=Pos
+	MsgCount   uint32 // 消息数量
+	Writting   bool   // 正在写消息中
 }
 
 func (t *Stream) Init(d []byte) {
 	t.Data = d
 	t.MaxLen = uint64(len(t.Data))
-	t.Pos = 0
+	t.CurrPos = 0
+	t.LastMsgPos = 0
+	t.Writting = false
+	t.MsgCount = 0
+}
+
+func (t *Stream) PacketBegin() {
+	t.Seek(0)
+	t.WriteUint32(0)
+	t.LastMsgPos = t.CurrPos
+	t.Writting = false
+	t.MsgCount = 0
+}
+
+func (t *Stream) PacketEnd() {
+	// LastMsgPos
+	// MsgCount
+	// Key
+	// 写入包头
+}
+
+func (t *Stream) WriteBegin(id uint16) {
+	if !t.Writting {
+		t.Writting = true
+		t.WriteUint16(0)
+		t.WriteUint16(id)
+	} else {
+		panic(errors.New("Stream:WriteBegin no end"))
+	}
+}
+
+func (t *Stream) WriteEnd() {
+	if t.Writting {
+		currPos := t.CurrPos
+		s.Seek(t.LastMsgPos)
+		t.WriteUint16(currPos - t.LastMsgPos)
+		s.Seek(currPos)
+		t.Writting = false
+		t.MsgCount++
+		t.LastMsgPos = currPos
+	} else {
+		panic(errors.New("Stream:WriteEnd no begin"))
+	}
+}
+
+func (t *Stream) MoveFailedMsg(tx *Stream) {
+	if t.Writting {
+		// 这个消息需要挪动
+		// 挪动完成
+		// t.Writting => false
+		// 可是, 消息write怎么继续?
+	}
 }
 
 func (t *Stream) Seek(p uint64) {
 	if t.Data != nil && p >= 0 && p < t.MaxLen {
-		t.Pos = p
+		t.CurrPos = p
 	}
 }
 
 func (t *Stream) GetPos() uint64 {
-	return t.Pos
+	return t.CurrPos
 }
 
 func (t *Stream) GetMaxLen() uint64 {
@@ -36,27 +95,27 @@ func (t *Stream) GetData() []byte {
 }
 
 func (t *Stream) ReadBool() bool {
-	if t.Pos < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 1
+	if t.CurrPos < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 1
 		return t.Data[o] != 0
 	}
 	panic(errors.New("Stream:ReadBool no long"))
 }
 
 func (t *Stream) ReadInt8() int8 {
-	if t.Pos < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 1
+	if t.CurrPos < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 1
 		return int8(t.Data[o])
 	}
 	panic(errors.New("Stream:ReadInt8 no long"))
 }
 
 func (t *Stream) ReadInt16() int16 {
-	if t.Pos+1 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 2
+	if t.CurrPos+1 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 2
 
 		return (int16(t.Data[o])) |
 			(int16(t.Data[o+1]) << 8)
@@ -65,9 +124,9 @@ func (t *Stream) ReadInt16() int16 {
 }
 
 func (t *Stream) ReadInt24() int32 {
-	if t.Pos+2 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 3
+	if t.CurrPos+2 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 3
 		n := (uint32(t.Data[o])) |
 			(uint32(t.Data[o+1]) << 8) |
 			(uint32(t.Data[o+2]) << 16)
@@ -80,9 +139,9 @@ func (t *Stream) ReadInt24() int32 {
 }
 
 func (t *Stream) ReadInt32() int32 {
-	if t.Pos+3 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 4
+	if t.CurrPos+3 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 4
 		return (int32(t.Data[o])) |
 			(int32(t.Data[o+1]) << 8) |
 			(int32(t.Data[o+2]) << 16) |
@@ -92,9 +151,9 @@ func (t *Stream) ReadInt32() int32 {
 }
 
 func (t *Stream) ReadInt40() int64 {
-	if t.Pos+4 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 5
+	if t.CurrPos+4 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 5
 		n := (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -109,9 +168,9 @@ func (t *Stream) ReadInt40() int64 {
 }
 
 func (t *Stream) ReadInt48() int64 {
-	if t.Pos+5 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 6
+	if t.CurrPos+5 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 6
 		n := (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -126,9 +185,9 @@ func (t *Stream) ReadInt48() int64 {
 }
 
 func (t *Stream) ReadInt56() int64 {
-	if t.Pos+6 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 7
+	if t.CurrPos+6 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 7
 		n := (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -144,9 +203,9 @@ func (t *Stream) ReadInt56() int64 {
 }
 
 func (t *Stream) ReadInt64() int64 {
-	if t.Pos+7 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 8
+	if t.CurrPos+7 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 8
 		return (int64(t.Data[o])) |
 			(int64(t.Data[o+1]) << 8) |
 			(int64(t.Data[o+2]) << 16) |
@@ -160,18 +219,18 @@ func (t *Stream) ReadInt64() int64 {
 }
 
 func (t *Stream) ReadUint8() uint8 {
-	if t.Pos < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 1
+	if t.CurrPos < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 1
 		return uint8(t.Data[o])
 	}
 	panic(errors.New("Stream:ReadUint8 no long"))
 }
 
 func (t *Stream) ReadUint16() uint16 {
-	if t.Pos+1 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 2
+	if t.CurrPos+1 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 2
 		return (uint16(t.Data[o])) |
 			(uint16(t.Data[o+1]) << 8)
 	}
@@ -179,9 +238,9 @@ func (t *Stream) ReadUint16() uint16 {
 }
 
 func (t *Stream) ReadUint24() uint32 {
-	if t.Pos+2 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 3
+	if t.CurrPos+2 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 3
 
 		return (uint32(t.Data[o])) |
 			(uint32(t.Data[o+1]) << 8) |
@@ -192,9 +251,9 @@ func (t *Stream) ReadUint24() uint32 {
 }
 
 func (t *Stream) ReadUint32() uint32 {
-	if t.Pos+3 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 4
+	if t.CurrPos+3 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 4
 		return (uint32(t.Data[o])) |
 			(uint32(t.Data[o+1]) << 8) |
 			(uint32(t.Data[o+2]) << 16) |
@@ -204,9 +263,9 @@ func (t *Stream) ReadUint32() uint32 {
 }
 
 func (t *Stream) ReadUint40() uint64 {
-	if t.Pos+4 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 5
+	if t.CurrPos+4 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 5
 		return (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -217,9 +276,9 @@ func (t *Stream) ReadUint40() uint64 {
 }
 
 func (t *Stream) ReadUint48() uint64 {
-	if t.Pos+5 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 6
+	if t.CurrPos+5 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 6
 		return (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -231,9 +290,9 @@ func (t *Stream) ReadUint48() uint64 {
 }
 
 func (t *Stream) ReadUint56() uint64 {
-	if t.Pos+6 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 7
+	if t.CurrPos+6 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 7
 		return (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -246,9 +305,9 @@ func (t *Stream) ReadUint56() uint64 {
 }
 
 func (t *Stream) ReadUint64() uint64 {
-	if t.Pos+7 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 8
+	if t.CurrPos+7 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 8
 		return (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -262,9 +321,9 @@ func (t *Stream) ReadUint64() uint64 {
 }
 
 func (t *Stream) ReadFloat32() float32 {
-	if t.Pos+3 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 4
+	if t.CurrPos+3 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 4
 		n := (uint32(t.Data[o])) |
 			(uint32(t.Data[o+1]) << 8) |
 			(uint32(t.Data[o+2]) << 16) |
@@ -275,9 +334,9 @@ func (t *Stream) ReadFloat32() float32 {
 }
 
 func (t *Stream) ReadFloat64() float64 {
-	if t.Pos+7 < t.MaxLen {
-		o := t.Pos
-		t.Pos = t.Pos + 8
+	if t.CurrPos+7 < t.MaxLen {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + 8
 		n := (uint64(t.Data[o])) |
 			(uint64(t.Data[o+1]) << 8) |
 			(uint64(t.Data[o+2]) << 16) |
@@ -293,9 +352,9 @@ func (t *Stream) ReadFloat64() float64 {
 
 func (t *Stream) ReadBytes() []byte {
 	data_len := uint64(t.ReadUint16())
-	if data_len > 0 && (t.Pos+data_len) < (t.MaxLen+1) {
-		o := t.Pos
-		t.Pos = t.Pos + data_len
+	if data_len > 0 && (t.CurrPos+data_len) < (t.MaxLen+1) {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + data_len
 		return t.Data[o : o+data_len]
 	}
 	panic(errors.New("Stream:ReadBytes no long"))
@@ -303,23 +362,23 @@ func (t *Stream) ReadBytes() []byte {
 
 func (t *Stream) ReadString() string {
 	data_len := uint64(t.ReadUint16())
-	if data_len > 0 && (t.Pos+data_len) < (t.MaxLen+1) {
-		o := t.Pos
-		t.Pos = t.Pos + data_len
+	if data_len > 0 && (t.CurrPos+data_len) < (t.MaxLen+1) {
+		o := t.CurrPos
+		t.CurrPos = t.CurrPos + data_len
 		return string(t.Data[o : o+data_len])
 	}
 	panic(errors.New("Stream:ReadString no long"))
 }
 
 func (t *Stream) WriteBool(d bool) {
-	if t.Pos+1 < t.MaxLen {
+	if t.CurrPos+1 < t.MaxLen {
 		if d {
-			t.Data[t.Pos] = 1
+			t.Data[t.CurrPos] = 1
 		} else {
-			t.Data[t.Pos] = 0
+			t.Data[t.CurrPos] = 0
 		}
 
-		t.Pos = t.Pos + 1
+		t.CurrPos = t.CurrPos + 1
 		return
 	}
 
@@ -327,9 +386,9 @@ func (t *Stream) WriteBool(d bool) {
 }
 
 func (t *Stream) WriteInt8(d int8) {
-	if t.Pos+1 < t.MaxLen {
-		t.Data[t.Pos] = byte(d)
-		t.Pos = t.Pos + 1
+	if t.CurrPos+1 < t.MaxLen {
+		t.Data[t.CurrPos] = byte(d)
+		t.CurrPos = t.CurrPos + 1
 		return
 	}
 
@@ -337,10 +396,10 @@ func (t *Stream) WriteInt8(d int8) {
 }
 
 func (t *Stream) WriteInt16(d int16) {
-	if t.Pos+2 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Pos = t.Pos + 2
+	if t.CurrPos+2 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.CurrPos = t.CurrPos + 2
 		return
 	}
 
@@ -349,13 +408,13 @@ func (t *Stream) WriteInt16(d int16) {
 
 // [-8388608,8388607]
 func (t *Stream) WriteInt24(d int32) {
-	if t.Pos+3 < t.MaxLen {
+	if t.CurrPos+3 < t.MaxLen {
 		// -2^23 ~ 2^23-1
 		if d >= -8388608 && d <= 8388607 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Pos = t.Pos + 3
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.CurrPos = t.CurrPos + 3
 			return
 		}
 		panic(errors.New("Stream:WriteInt24 out of [-8388608,8388607]"))
@@ -365,12 +424,12 @@ func (t *Stream) WriteInt24(d int32) {
 }
 
 func (t *Stream) WriteInt32(d int32) {
-	if t.Pos+4 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Data[t.Pos+2] = byte(d >> 16)
-		t.Data[t.Pos+3] = byte(d >> 24)
-		t.Pos = t.Pos + 4
+	if t.CurrPos+4 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.Data[t.CurrPos+2] = byte(d >> 16)
+		t.Data[t.CurrPos+3] = byte(d >> 24)
+		t.CurrPos = t.CurrPos + 4
 		return
 	}
 
@@ -379,15 +438,15 @@ func (t *Stream) WriteInt32(d int32) {
 
 // [-549755813888,549755813887]
 func (t *Stream) WriteInt40(d int64) {
-	if t.Pos+5 < t.MaxLen {
+	if t.CurrPos+5 < t.MaxLen {
 		// -2^39 ~ 2^39-1
 		if d >= -549755813888 && d <= 549755813887 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Pos = t.Pos + 5
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.CurrPos = t.CurrPos + 5
 			return
 		}
 		panic(errors.New("Stream:WriteInt40 out of [-549755813888,549755813887]"))
@@ -398,16 +457,16 @@ func (t *Stream) WriteInt40(d int64) {
 
 // [-140737488355328,140737488355327]
 func (t *Stream) WriteInt48(d int64) {
-	if t.Pos+6 < t.MaxLen {
+	if t.CurrPos+6 < t.MaxLen {
 		// -2^47 ~ 2^47-1
 		if d >= -140737488355328 && d <= 140737488355327 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Data[t.Pos+5] = byte(d >> 40)
-			t.Pos = t.Pos + 6
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.Data[t.CurrPos+5] = byte(d >> 40)
+			t.CurrPos = t.CurrPos + 6
 			return
 		}
 		panic(errors.New("Stream:WriteInt48 out of [-140737488355328,140737488355327]"))
@@ -418,17 +477,17 @@ func (t *Stream) WriteInt48(d int64) {
 
 // [-36028797018963968,36028797018963967]
 func (t *Stream) WriteInt56(d int64) {
-	if t.Pos+7 < t.MaxLen {
+	if t.CurrPos+7 < t.MaxLen {
 		// -2^55 ~ 2^55-1
 		if d >= -36028797018963968 && d <= 36028797018963967 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Data[t.Pos+5] = byte(d >> 40)
-			t.Data[t.Pos+6] = byte(d >> 48)
-			t.Pos = t.Pos + 7
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.Data[t.CurrPos+5] = byte(d >> 40)
+			t.Data[t.CurrPos+6] = byte(d >> 48)
+			t.CurrPos = t.CurrPos + 7
 			return
 		}
 		panic(errors.New("Stream:WriteInt56 out of [-36028797018963968,36028797018963967]"))
@@ -438,16 +497,16 @@ func (t *Stream) WriteInt56(d int64) {
 }
 
 func (t *Stream) WriteInt64(d int64) {
-	if t.Pos+8 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Data[t.Pos+2] = byte(d >> 16)
-		t.Data[t.Pos+3] = byte(d >> 24)
-		t.Data[t.Pos+4] = byte(d >> 32)
-		t.Data[t.Pos+5] = byte(d >> 40)
-		t.Data[t.Pos+6] = byte(d >> 48)
-		t.Data[t.Pos+7] = byte(d >> 56)
-		t.Pos = t.Pos + 8
+	if t.CurrPos+8 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.Data[t.CurrPos+2] = byte(d >> 16)
+		t.Data[t.CurrPos+3] = byte(d >> 24)
+		t.Data[t.CurrPos+4] = byte(d >> 32)
+		t.Data[t.CurrPos+5] = byte(d >> 40)
+		t.Data[t.CurrPos+6] = byte(d >> 48)
+		t.Data[t.CurrPos+7] = byte(d >> 56)
+		t.CurrPos = t.CurrPos + 8
 		return
 	}
 
@@ -455,9 +514,9 @@ func (t *Stream) WriteInt64(d int64) {
 }
 
 func (t *Stream) WriteUint8(d uint8) {
-	if t.Pos < t.MaxLen {
-		t.Data[t.Pos] = byte(d)
-		t.Pos = t.Pos + 1
+	if t.CurrPos < t.MaxLen {
+		t.Data[t.CurrPos] = byte(d)
+		t.CurrPos = t.CurrPos + 1
 		return
 	}
 
@@ -465,10 +524,10 @@ func (t *Stream) WriteUint8(d uint8) {
 }
 
 func (t *Stream) WriteUint16(d uint16) {
-	if t.Pos+1 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Pos = t.Pos + 2
+	if t.CurrPos+1 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.CurrPos = t.CurrPos + 2
 		return
 	}
 
@@ -477,13 +536,13 @@ func (t *Stream) WriteUint16(d uint16) {
 
 // [0,16777215]
 func (t *Stream) WriteUint24(d uint32) {
-	if t.Pos+2 < t.MaxLen {
+	if t.CurrPos+2 < t.MaxLen {
 		// 0 ~ 2^24-1
 		if d <= 16777215 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Pos = t.Pos + 3
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.CurrPos = t.CurrPos + 3
 			return
 		}
 		panic(errors.New("Stream:WriteUint24 out of [0,16777215]"))
@@ -494,12 +553,12 @@ func (t *Stream) WriteUint24(d uint32) {
 }
 
 func (t *Stream) WriteUint32(d uint32) {
-	if t.Pos+3 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Data[t.Pos+2] = byte(d >> 16)
-		t.Data[t.Pos+3] = byte(d >> 24)
-		t.Pos = t.Pos + 4
+	if t.CurrPos+3 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.Data[t.CurrPos+2] = byte(d >> 16)
+		t.Data[t.CurrPos+3] = byte(d >> 24)
+		t.CurrPos = t.CurrPos + 4
 		return
 	}
 
@@ -508,15 +567,15 @@ func (t *Stream) WriteUint32(d uint32) {
 
 // [0,1099511627775]
 func (t *Stream) WriteUint40(d uint64) {
-	if t.Pos+4 < t.MaxLen {
+	if t.CurrPos+4 < t.MaxLen {
 		// 0 ~ 2^40-1
 		if d <= 1099511627775 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Pos = t.Pos + 5
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.CurrPos = t.CurrPos + 5
 			return
 		}
 		panic(errors.New("Stream:WriteUint40 out of [0,1099511627775]"))
@@ -527,16 +586,16 @@ func (t *Stream) WriteUint40(d uint64) {
 
 // [0,1099511627775]
 func (t *Stream) WriteUint48(d uint64) {
-	if t.Pos+5 < t.MaxLen {
+	if t.CurrPos+5 < t.MaxLen {
 		// 0 ~ 2^48-1
 		if d <= 1099511627775 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Data[t.Pos+5] = byte(d >> 40)
-			t.Pos = t.Pos + 6
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.Data[t.CurrPos+5] = byte(d >> 40)
+			t.CurrPos = t.CurrPos + 6
 			return
 		}
 		panic(errors.New("Stream:WriteUint48 out of [0,1099511627775]"))
@@ -547,17 +606,17 @@ func (t *Stream) WriteUint48(d uint64) {
 
 // [0,72057594037927935]
 func (t *Stream) WriteUint56(d uint64) {
-	if t.Pos+6 < t.MaxLen {
+	if t.CurrPos+6 < t.MaxLen {
 		// 0 ~ 2^56-1
 		if d <= 72057594037927935 {
-			t.Data[t.Pos+0] = byte(d)
-			t.Data[t.Pos+1] = byte(d >> 8)
-			t.Data[t.Pos+2] = byte(d >> 16)
-			t.Data[t.Pos+3] = byte(d >> 24)
-			t.Data[t.Pos+4] = byte(d >> 32)
-			t.Data[t.Pos+5] = byte(d >> 40)
-			t.Data[t.Pos+6] = byte(d >> 48)
-			t.Pos = t.Pos + 7
+			t.Data[t.CurrPos+0] = byte(d)
+			t.Data[t.CurrPos+1] = byte(d >> 8)
+			t.Data[t.CurrPos+2] = byte(d >> 16)
+			t.Data[t.CurrPos+3] = byte(d >> 24)
+			t.Data[t.CurrPos+4] = byte(d >> 32)
+			t.Data[t.CurrPos+5] = byte(d >> 40)
+			t.Data[t.CurrPos+6] = byte(d >> 48)
+			t.CurrPos = t.CurrPos + 7
 			return
 		}
 		panic(errors.New("Stream:WriteUint56 out of [0,72057594037927935]"))
@@ -567,16 +626,16 @@ func (t *Stream) WriteUint56(d uint64) {
 }
 
 func (t *Stream) WriteUint64(d uint64) {
-	if t.Pos+7 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(d)
-		t.Data[t.Pos+1] = byte(d >> 8)
-		t.Data[t.Pos+2] = byte(d >> 16)
-		t.Data[t.Pos+3] = byte(d >> 24)
-		t.Data[t.Pos+4] = byte(d >> 32)
-		t.Data[t.Pos+5] = byte(d >> 40)
-		t.Data[t.Pos+6] = byte(d >> 48)
-		t.Data[t.Pos+7] = byte(d >> 56)
-		t.Pos = t.Pos + 8
+	if t.CurrPos+7 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(d)
+		t.Data[t.CurrPos+1] = byte(d >> 8)
+		t.Data[t.CurrPos+2] = byte(d >> 16)
+		t.Data[t.CurrPos+3] = byte(d >> 24)
+		t.Data[t.CurrPos+4] = byte(d >> 32)
+		t.Data[t.CurrPos+5] = byte(d >> 40)
+		t.Data[t.CurrPos+6] = byte(d >> 48)
+		t.Data[t.CurrPos+7] = byte(d >> 56)
+		t.CurrPos = t.CurrPos + 8
 		return
 	}
 
@@ -586,12 +645,12 @@ func (t *Stream) WriteUint64(d uint64) {
 func (t *Stream) WriteFloat32(d float32) {
 	c := math.Float32bits(d)
 
-	if t.Pos+3 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(c)
-		t.Data[t.Pos+1] = byte(c >> 8)
-		t.Data[t.Pos+2] = byte(c >> 16)
-		t.Data[t.Pos+3] = byte(c >> 24)
-		t.Pos = t.Pos + 4
+	if t.CurrPos+3 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(c)
+		t.Data[t.CurrPos+1] = byte(c >> 8)
+		t.Data[t.CurrPos+2] = byte(c >> 16)
+		t.Data[t.CurrPos+3] = byte(c >> 24)
+		t.CurrPos = t.CurrPos + 4
 		return
 	}
 
@@ -601,16 +660,16 @@ func (t *Stream) WriteFloat32(d float32) {
 func (t *Stream) WriteFloat64(d float64) {
 	c := math.Float64bits(d)
 
-	if t.Pos+7 < t.MaxLen {
-		t.Data[t.Pos+0] = byte(c)
-		t.Data[t.Pos+1] = byte(c >> 8)
-		t.Data[t.Pos+2] = byte(c >> 16)
-		t.Data[t.Pos+3] = byte(c >> 24)
-		t.Data[t.Pos+4] = byte(c >> 32)
-		t.Data[t.Pos+5] = byte(c >> 40)
-		t.Data[t.Pos+6] = byte(c >> 48)
-		t.Data[t.Pos+7] = byte(c >> 56)
-		t.Pos = t.Pos + 8
+	if t.CurrPos+7 < t.MaxLen {
+		t.Data[t.CurrPos+0] = byte(c)
+		t.Data[t.CurrPos+1] = byte(c >> 8)
+		t.Data[t.CurrPos+2] = byte(c >> 16)
+		t.Data[t.CurrPos+3] = byte(c >> 24)
+		t.Data[t.CurrPos+4] = byte(c >> 32)
+		t.Data[t.CurrPos+5] = byte(c >> 40)
+		t.Data[t.CurrPos+6] = byte(c >> 48)
+		t.Data[t.CurrPos+7] = byte(c >> 56)
+		t.CurrPos = t.CurrPos + 8
 		return
 	}
 
@@ -620,10 +679,10 @@ func (t *Stream) WriteFloat64(d float64) {
 func (t *Stream) WriteBytes(d []byte) {
 	d_len := uint64(len(d))
 
-	if t.Pos+d_len+1 < t.MaxLen {
+	if t.CurrPos+d_len+1 < t.MaxLen {
 		t.WriteUint16(uint16(d_len))
-		copy(t.Data[t.Pos:], d[:])
-		t.Pos = t.Pos + d_len
+		copy(t.Data[t.CurrPos:], d[:])
+		t.CurrPos = t.CurrPos + d_len
 		return
 	}
 
@@ -633,10 +692,10 @@ func (t *Stream) WriteBytes(d []byte) {
 func (t *Stream) WriteString(d *string) {
 	d_len := uint64(len(*d))
 
-	if t.Pos+d_len+1 < t.MaxLen {
+	if t.CurrPos+d_len+1 < t.MaxLen {
 		t.WriteUint16(uint16(d_len))
-		copy(t.Data[t.Pos:t.Pos+d_len], (*d)[:])
-		t.Pos = t.Pos + d_len
+		copy(t.Data[t.CurrPos:t.CurrPos+d_len], (*d)[:])
+		t.CurrPos = t.CurrPos + d_len
 		return
 	}
 	panic(errors.New("Stream:WriteString no long"))
