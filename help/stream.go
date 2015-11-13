@@ -5,75 +5,16 @@ import (
 	"math"
 )
 
-const (
-	MsgHeaderSize    = 4
-	PacketHeaderSize = 4
-)
-
 type Stream struct {
-	Data       []byte // 数据流
-	MaxLen     uint64 // 数据流长度
-	CurrPos    uint64 // 当前最新位置
-	LastMsgPos uint64 // 最后一个完整写入的消息位置, LastMsgPos<=Pos
-	MsgCount   uint32 // 消息数量
-	Writting   bool   // 正在写消息中
+	Data    []byte // 数据流
+	MaxLen  uint64 // 数据流长度
+	CurrPos uint64 // 当前最新位置
 }
 
 func (t *Stream) Init(d []byte) {
 	t.Data = d
 	t.MaxLen = uint64(len(t.Data))
 	t.CurrPos = 0
-	t.LastMsgPos = 0
-	t.Writting = false
-	t.MsgCount = 0
-}
-
-func (t *Stream) PacketBegin() {
-	t.Seek(0)
-	t.WriteUint32(0)
-	t.LastMsgPos = t.CurrPos
-	t.Writting = false
-	t.MsgCount = 0
-}
-
-func (t *Stream) PacketEnd() {
-	// LastMsgPos
-	// MsgCount
-	// Key
-	// 写入包头
-}
-
-func (t *Stream) WriteBegin(id uint16) {
-	if !t.Writting {
-		t.Writting = true
-		t.WriteUint16(0)
-		t.WriteUint16(id)
-	} else {
-		panic(errors.New("Stream:WriteBegin no end"))
-	}
-}
-
-func (t *Stream) WriteEnd() {
-	if t.Writting {
-		currPos := t.CurrPos
-		s.Seek(t.LastMsgPos)
-		t.WriteUint16(currPos - t.LastMsgPos)
-		s.Seek(currPos)
-		t.Writting = false
-		t.MsgCount++
-		t.LastMsgPos = currPos
-	} else {
-		panic(errors.New("Stream:WriteEnd no begin"))
-	}
-}
-
-func (t *Stream) MoveFailedMsg(tx *Stream) {
-	if t.Writting {
-		// 这个消息需要挪动
-		// 挪动完成
-		// t.Writting => false
-		// 可是, 消息write怎么继续?
-	}
 }
 
 func (t *Stream) Seek(p uint64) {
