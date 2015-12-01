@@ -217,6 +217,12 @@ type EB_Enum struct {
 	Value string
 }
 
+// 引用文件
+type EB_Include struct {
+	EB_Base
+	Value string
+}
+
 type EB_ParseTable struct {
 	Cells    map[string]interface{}
 	CurrCell string
@@ -243,10 +249,12 @@ func ParseToNewGolang(d string, fd string, f string) {
 		os.MkdirAll(fd, os.ModeDir)
 	}
 
-	if !help.IsExist(fd + f) {
-		os.Create(fd + f)
+	target_file := fd + "/" + f
+
+	if help.IsExist(target_file) {
+		os.Remove(target_file)
 	}
-	file, err := os.OpenFile(fd+f, os.O_RDWR, os.ModePerm)
+	file, err := os.OpenFile(target_file, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		panic(err.Error())
 	}
@@ -258,10 +266,6 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 
 		package proto
-
-		import (
-			. "github.com/toophy/login/help"
-		)
 
 		`)
 
@@ -275,6 +279,21 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 	sort.Sort(sort.StringSlice(keys))
 
+	// 引用文件
+
+	file.WriteString("import (\n")
+
+	for _, key := range keys {
+
+		switch table.Cells[key].(type) {
+		case *EB_Include:
+			d := table.Cells[key].(*EB_Include)
+			file.WriteString(fmt.Sprintf(".\"%s\"\n", d.Value))
+		}
+	}
+	file.WriteString(")\n\n")
+
+	// 枚举
 	for _, key := range keys {
 
 		switch table.Cells[key].(type) {
@@ -288,7 +307,6 @@ func ParseToNewGolang(d string, fd string, f string) {
 			file.WriteString(fmt.Sprintf("const %s = %s \n", d.Name, d.Value))
 		}
 	}
-
 	file.WriteString("\n\n")
 
 	for _, key := range keys {
@@ -465,10 +483,10 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 	file.Close()
 
-	cmd_data := exec.Command("gofmt", "-w", fd+f)
+	cmd_data := exec.Command("gofmt", "-w", target_file)
 	err = cmd_data.Run()
 	if err != nil {
-		fmt.Println(fd + f + "," + err.Error())
+		fmt.Println(target_file + "," + err.Error())
 	}
 }
 
@@ -561,6 +579,31 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 			table.Comment = table.Comment[0:0]
 		}
 
+	case "include":
+		if lens < 3 {
+			panic("文件格式错误 : include 行错误 [" + r3 + "]")
+		}
+
+		t := &EB_Include{}
+		t.Name = m[1]
+		t.Value = m[2]
+
+		if _, ok := table.Cells[t.Name]; ok {
+			panic("文件内容错误 : include 重名 [" + r3 + "]")
+		}
+
+		table.Cells[t.Name] = t
+
+		t.Comment = make([]string, 10)
+		if len(table.Comment) > 0 {
+			for k, _ := range table.Comment {
+				if len(table.Comment[k]) > 0 {
+					t.Comment = append(t.Comment, table.Comment[k])
+				}
+			}
+			table.Comment = table.Comment[0:0]
+		}
+
 	case "}":
 		// message 结束符号
 		if len(table.CurrCell) == 0 {
@@ -614,253 +657,4 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 
 		table.Cells[table.CurrCell].(*EB_Message).Members[mb.Name] = mb
 	}
-}
-
-func ParseToGolang(d string, fd string, f string) {
-
-	r1 := strings.Replace(d, "\t", " ", -1)
-	r2 := strings.Replace(r1, "\r\n", " ", -1)
-	r3 := strings.Replace(r2, "\n", " ", -1)
-	r4 := strings.Replace(r3, "{", " ", -1)
-	r5 := strings.Replace(r4, "}", " ", -1)
-
-	m := strings.Fields(r5)
-
-	lens := len(m)
-
-	data_struct := make([]string, 10)
-	data_read := make([]string, 10)
-	data_write := make([]string, 10)
-
-	data_count := 0
-
-	flag := "key"
-	member := ""
-
-	for i := 0; i < lens; i++ {
-		switch m[i] {
-		case "message":
-			switch flag {
-			case "key":
-			default:
-				if flag == "member" {
-					data_count++
-				} else {
-					fmt.Printf("flag=%s,解析失败[%s]\n", flag, data_struct[data_count])
-					data_struct[data_count] = ""
-					data_read[data_count] = ""
-					data_write[data_count] = ""
-				}
-			}
-			flag = "name"
-
-		default:
-			switch flag {
-
-			case "name":
-				data_struct[data_count] += "type " + m[i] + " struct {\n"
-				data_read[data_count] += "func (this *" + m[i] + ") Read(s *Stream) {\n"
-				data_write[data_count] += "func (this *" + m[i] + ") Write(s *Stream) {\n"
-				flag = "msgId"
-
-			case "msgId":
-				data_struct[data_count] += "type " + m[i] + " struct {\n"
-				flag = "desc"
-
-			case "desc":
-				data_struct[data_count] += "// " + m[i] + "\n"
-				flag = "member"
-
-			case "member":
-				member = m[i]
-				flag = "type"
-
-			case "type":
-				if len(member) > 0 {
-					type_name := TypeToGolang(m[i])
-					if type_name == "" {
-						data_struct[data_count] += "\t" + member + "\t" + m[i] + "// " + m[i] + "\n"
-					} else {
-						data_struct[data_count] += "\t" + member + "\t" + type_name + "// " + m[i] + "\n"
-					}
-
-					func_read := GetReadFunc(m[i])
-					if func_read == "" {
-						data_read[data_count] += "\t" + "this." + member + ".Read(s)\n"
-					} else {
-						data_read[data_count] += "\t" + "s." + GetReadFunc(m[i]) + "(this." + member + ")\n"
-					}
-
-					func_write := GetWriteFunc(m[i])
-					if func_write == "" {
-						data_write[data_count] += "\t" + "this." + member + ".Write(s)\n"
-					} else {
-						data_write[data_count] += "\t" + "s." + GetWriteFunc(m[i]) + "(this." + member + ")\n"
-					}
-				} else {
-					fmt.Printf("flag=%s,解析失败[%s]\n", flag, data_struct[data_count])
-				}
-
-				flag = "member"
-			}
-		}
-	}
-
-	for i := 0; i <= data_count; i++ {
-		data_struct[i] += "}\n\n"
-		data_read[i] += "}\n\n"
-		data_write[i] += "}\n\n"
-	}
-
-	// 检查log目录
-	if !help.IsExist(fd) {
-		os.MkdirAll(fd, os.ModeDir)
-	}
-
-	if !help.IsExist(fd + f) {
-		os.Create(fd + f)
-	}
-	file, err := os.OpenFile(fd+f, os.O_RDWR, os.ModePerm)
-	if err != nil {
-		panic(err.Error())
-	}
-	// 文件头
-	file.WriteString(
-		`// easybuff
-// 不要修改本文件, 每次消息有变动, 请手动生成本文件
-// easybuff -s 描述文件目录 -o 目标文件目录 -l 语言(go,cpp)
-
-
-package proto
-
-import (
-	. "github.com/toophy/login/help"
-)
-
-`)
-
-	for i := 0; i <= data_count; i++ {
-		file.WriteString(data_struct[i])
-		file.WriteString(data_read[i])
-		file.WriteString(data_write[i])
-	}
-
-	file.Close()
-
-	cmd_data := exec.Command("gofmt", "-w", fd+f)
-	err = cmd_data.Run()
-	if err != nil {
-		fmt.Println(fd + f + "," + err.Error())
-	}
-}
-
-func ParseToCpplang(d string, fd string, f string) {
-
-	r1 := strings.Replace(d, "\t", " ", -1)
-	r2 := strings.Replace(r1, "\r\n", " ", -1)
-	r3 := strings.Replace(r2, "\n", " ", -1)
-	r4 := strings.Replace(r3, "{", " ", -1)
-	r5 := strings.Replace(r4, "}", " ", -1)
-
-	m := strings.Fields(r5)
-
-	lens := len(m)
-
-	data_struct := make([]string, 10)
-	data_read := make([]string, 10)
-	data_write := make([]string, 10)
-
-	data_count := 0
-
-	flag := "key"
-	member := ""
-
-	for i := 0; i < lens; i++ {
-		switch m[i] {
-		case "-message-":
-			switch flag {
-			case "key":
-			default:
-				if flag == "member" {
-					data_count++
-				} else {
-					fmt.Printf("flag=%s,解析失败[%s]\n", flag, data_struct[data_count])
-					data_struct[data_count] = ""
-					data_read[data_count] = ""
-					data_write[data_count] = ""
-				}
-			}
-			flag = "desc"
-
-		default:
-			switch flag {
-			case "desc":
-				data_struct[data_count] += "// " + m[i] + "\n"
-				flag = "name"
-
-			case "name":
-				data_struct[data_count] += "class " + m[i] + " {\n"
-				data_read[data_count] += "void " + m[i] + "::Read(s *Stream) {\n"
-				data_write[data_count] += "void " + m[i] + "::Write(s *Stream) {\n"
-				flag = "member"
-
-			case "member":
-				member = m[i]
-				flag = "type"
-
-			case "type":
-				if len(member) > 0 {
-					type_name := TypeToClang(m[i])
-					if type_name == "" {
-						data_struct[data_count] += "\t" + m[i] + "\t" + member + "; // " + m[i] + "\n"
-					} else {
-						data_struct[data_count] += "\t" + type_name + "\t" + member + "; // " + m[i] + "\n"
-					}
-
-					func_read := GetReadFunc(m[i])
-					if func_read == "" {
-						data_read[data_count] += "\t" + "this." + member + ".Read(s);\n"
-					} else {
-						data_read[data_count] += "\t" + "s." + GetReadFunc(m[i]) + "(this." + member + ");\n"
-					}
-
-					func_write := GetWriteFunc(m[i])
-					if func_write == "" {
-						data_write[data_count] += "\t" + "this." + member + ".Write(s);\n"
-					} else {
-						data_write[data_count] += "\t" + "s." + GetWriteFunc(m[i]) + "(this." + member + ");\n"
-					}
-				} else {
-					fmt.Printf("flag=%s,解析失败[%s]\n", flag, data_struct[data_count])
-				}
-
-				flag = "member"
-			}
-		}
-	}
-
-	for i := 0; i <= data_count; i++ {
-		data_struct[i] += "};\n\n"
-		data_read[i] += "}\n\n"
-		data_write[i] += "}\n\n"
-	}
-	// 检查log目录
-	if !help.IsExist(fd) {
-		os.MkdirAll(fd, os.ModeDir)
-	}
-
-	if !help.IsExist(fd + f) {
-		os.Create(fd + f)
-	}
-	file, err := os.OpenFile(fd+f, os.O_RDWR, os.ModePerm)
-	if err != nil {
-		panic(err.Error())
-	}
-	for i := 0; i <= data_count; i++ {
-		file.WriteString(data_struct[i])
-		file.WriteString(data_read[i])
-		file.WriteString(data_write[i])
-	}
-
-	file.Close()
 }

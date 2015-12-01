@@ -9,8 +9,8 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+	"strings"
 	"sync"
-	// "time"
 )
 
 // easybuff -s 描述文件目录 -d 目标文件目录 -l 语言(go,cpp)
@@ -25,10 +25,16 @@ func main() {
 
 	flag.Parse()
 
-	fmt.Println(*g_Source, *g_Target, *g_Language)
+	source_dir := *g_Source
+	target_dir := *g_Target
 
-	if !help.IsExist(*g_Source) {
-		fmt.Printf("找不到描述文件目录[%s]\n", g_Source)
+	source_dir = strings.TrimSuffix(source_dir, "/")
+	target_dir = strings.TrimSuffix(target_dir, "/")
+
+	fmt.Println(source_dir, target_dir, *g_Language)
+
+	if !help.IsExist(source_dir) {
+		fmt.Printf("找不到描述文件目录[%s]\n", source_dir)
 		return
 	}
 
@@ -36,7 +42,7 @@ func main() {
 	fmt.Println(cd)
 
 	fs := help.NewFileSearch()
-	fs.Dir = *g_Source
+	fs.Dir = source_dir
 	fs.KeyWord = "/*.epd"
 	fs.SubDir = false
 	fl, _ := fs.RegSearchToList()
@@ -47,7 +53,7 @@ func main() {
 		g_CountMutex.Unlock()
 
 		go func(k string) {
-			file_path := *g_Source + k
+			file_path := source_dir + "/" + k
 
 			fi, err := os.Open(file_path)
 			if err != nil {
@@ -59,9 +65,9 @@ func main() {
 
 			switch *g_Language {
 			case "go":
-				proto.ParseToNewGolang(string(fd), *g_Target, k+".go")
-			case "cpp":
-				proto.ParseToCpplang(string(fd), *g_Target, k+".cpp")
+				proto.ParseToNewGolang(string(fd), target_dir, k+".go")
+				// case "cpp":
+				// 	proto.ParseToCpplang(string(fd), target_dir, k+".cpp")
 			}
 			g_CountMutex.Lock()
 			g_Count--
