@@ -323,6 +323,8 @@ func ParseToNewGolang(d string, fd string, f string) {
 
 			if len(d.MsgId) > 0 {
 				file.WriteString(fmt.Sprintf("const %s_Id = %s\n", d.Name, d.MsgId))
+			} else {
+				panic("文件格式错误 : message [" + d.Name + "]的ID非法")
 			}
 
 			file.WriteString(fmt.Sprintf("type %s struct {\n", d.Name))
@@ -345,32 +347,32 @@ func ParseToNewGolang(d string, fd string, f string) {
 			file.WriteString("}\n")
 
 			// read
-			file.WriteString(fmt.Sprintf("func (t *%s) Read(s *Stream) {\n", d.Name))
+			file.WriteString(fmt.Sprintf("func (t *%s) Read(p *PacketReader) {\n", d.Name))
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				fn := GetReadFunc(m.Type)
 				if fn == "" {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" t.%s.Read(s)\n", m.Name))
+						file.WriteString(fmt.Sprintf(" t.%s.Read(p)\n", m.Name))
 					} else {
 						file.WriteString(fmt.Sprintf(`
-													  len_%s := int(s.%s())
+													  len_%s := int(p.%s())
 													  t.%s = make([]%s,len_%s)
 													  for i:=0;i<len_%s;i++ {
-													  	t.%s[i].Read(s)
+													  	t.%s[i].Read(p)
 													  }
 													  
 													  `, m.Name, GetReadFunc("uint8"), m.Name, TypeToGolang(m.Type), m.Name, m.Name, m.Name))
 					}
 				} else {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" t.%s = s.%s()\n", m.Name, fn))
+						file.WriteString(fmt.Sprintf(" t.%s = p.%s()\n", m.Name, fn))
 					} else {
 						file.WriteString(fmt.Sprintf(`
-													  len_%s := int(s.%s())
+													  len_%s := int(p.%s())
 													  t.%s = make([]%s,len_%s)
 													  for i:=0;i<len_%s;i++ {
-													  	 t.%s = s.%s()
+													  	 t.%s = p.%s()
 													  }
 													  
 													  `, m.Name, GetReadFunc("uint8"), m.Name, TypeToGolang(m.Type), m.Name, m.Name, m.Name, fn))
@@ -381,7 +383,9 @@ func ParseToNewGolang(d string, fd string, f string) {
 			file.WriteString("}\n\n")
 
 			// write
-			file.WriteString(fmt.Sprintf("func (t *%s) Write(s *Stream) {\n", d.Name))
+			file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) {
+				p.WriteMsgId(%s_Id)
+				`, d.Name, d.Name))
 			// write len, msg_id
 			// old_pos := s.GetPos()
 			// s.Seek(old_pos+help.MsgHeaderSize)
@@ -397,14 +401,14 @@ func ParseToNewGolang(d string, fd string, f string) {
 				if fn == "" {
 
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" t.%s.Write(s)", m.Name))
+						file.WriteString(fmt.Sprintf(" t.%s.Write(p)", m.Name))
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(len(t.%s)))
+														  p.%s(uint8(len(t.%s)))
 														  for k,_ := range t.%s {
-														  	t.%s[k].Write(s)
+														  	t.%s[k].Write(p)
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
@@ -412,10 +416,10 @@ func ParseToNewGolang(d string, fd string, f string) {
 						} else {
 							// 枚举
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(%s))
+														  p.%s(uint8(%s))
 														  len_%s := len(t.%s)
 														  for i:=0; i<%s && i<len_%s; i++ {
-														  	t.%s[i].Write(s)
+														  	t.%s[i].Write(p)
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, m.Name))
@@ -424,14 +428,14 @@ func ParseToNewGolang(d string, fd string, f string) {
 				} else if m.Type == "string" {
 
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" s.%s(&t.%s)\n", fn, m.Name))
+						file.WriteString(fmt.Sprintf(" p.%s(&t.%s)\n", fn, m.Name))
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(len(t.%s)))
+														  p.%s(uint8(len(t.%s)))
 														  for k,_ := range t.%s {
-														  	s.%s(&t.%s[i])
+														  	p.%s(&t.%s[i])
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
@@ -439,10 +443,10 @@ func ParseToNewGolang(d string, fd string, f string) {
 						} else {
 							// 枚举
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(%s))
+														  p.%s(uint8(%s))
 														  len_%s := len(t.%s)
 														  for i:=0; i<%s && i<len_%s; i++ {
-														  	s.%s(&t.%s[i])
+														  	p.%s(&t.%s[i])
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
@@ -450,14 +454,14 @@ func ParseToNewGolang(d string, fd string, f string) {
 					}
 				} else {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" s.%s(t.%s)\n", fn, m.Name))
+						file.WriteString(fmt.Sprintf(" p.%s(t.%s)\n", fn, m.Name))
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(len(t.%s)))
+														  p.%s(uint8(len(t.%s)))
 														  for k,_ := range t.%s {
-														  	s.%s(t.%s[i])
+														  	p.%s(t.%s[i])
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
@@ -465,10 +469,10 @@ func ParseToNewGolang(d string, fd string, f string) {
 						} else {
 							// 枚举
 							file.WriteString(fmt.Sprintf(`
-														  s.%s(uint8(%s))
+														  p.%s(uint8(%s))
 														  len_%s := len(t.%s)
 														  for i:=0; i<%s && i<len_%s; i++ {
-														  	s.%s(t.%s[i])
+														  	p.%s(t.%s[i])
 														  }
 														  
 														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
@@ -477,7 +481,8 @@ func ParseToNewGolang(d string, fd string, f string) {
 				}
 			}
 
-			file.WriteString("}\n\n\n")
+			// write over
+			file.WriteString("p.WriteMsgOver()\n}\n\n\n")
 		}
 	}
 
