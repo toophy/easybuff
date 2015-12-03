@@ -347,7 +347,10 @@ func ParseToNewGolang(d string, fd string, f string) {
 			file.WriteString("}\n")
 
 			// read
-			file.WriteString(fmt.Sprintf("func (t *%s) Read(p *PacketReader) {\n", d.Name))
+			file.WriteString(fmt.Sprintf(`func (t *%s) Read(p *PacketReader) bool {
+				defer RecoverRead(%s_Id)
+
+				`, d.Name, d.Name))
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				fn := GetReadFunc(m.Type)
@@ -380,12 +383,14 @@ func ParseToNewGolang(d string, fd string, f string) {
 				}
 			}
 
-			file.WriteString("}\n\n")
+			file.WriteString("\nreturn true\n}\n\n")
 
 			// write
-			file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) {
+			file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) bool {
+				defer RecoverWrite(%s_Id)
+
 				p.WriteMsgId(%s_Id)
-				`, d.Name, d.Name))
+				`, d.Name, d.Name, d.Name))
 			// write len, msg_id
 			// old_pos := s.GetPos()
 			// s.Seek(old_pos+help.MsgHeaderSize)
@@ -482,7 +487,7 @@ func ParseToNewGolang(d string, fd string, f string) {
 			}
 
 			// write over
-			file.WriteString("p.WriteMsgOver()\n}\n\n\n")
+			file.WriteString("p.WriteMsgOver()\n\nreturn true\n}\n\n\n")
 		}
 	}
 
