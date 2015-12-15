@@ -207,7 +207,7 @@ type EB_Base struct {
 // 消息定义
 type EB_Message struct {
 	EB_Base
-	MsgId   string
+	MsgId   int
 	Members map[string]*EB_MsgMember
 }
 
@@ -225,10 +225,16 @@ type EB_Include struct {
 
 type EB_ParseTable struct {
 	Cells    map[string]interface{}
+	MsgIds   map[int]string
 	CurrCell string
 	Comment  []string
-	MsgId    string
+	MsgId    int // 按照文件start_id为起始规则递增, 但是整体受MsgIds控制, 不能有任何重复, 否则生成协议失败
 }
+
+// MsgId
+// 每个epd文件, MsgId按照文件中顺序递增, 空消息[message {}]可以占位,
+// 有结构名的消息不认为是空消息, epd文件中"start_id"关键字后面的数值
+// 是本文件起始消息Id, 不得随意修改, 修改后, 要求所有管理系统重新编译
 
 func ParseToNewGolang(d string, fd string, f string) {
 	// 结构,枚举唯一
@@ -620,6 +626,7 @@ func ParseToNewGolangRow(row_id int, d string, table *EB_ParseTable) {
 			panic("文件格式错误 : 多余的结束符 } .")
 		}
 		table.CurrCell = ""
+		table.MsgId = ""
 
 	case "--":
 		// 注释行, 本行注释, 作用给下一行
