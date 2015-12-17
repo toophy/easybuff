@@ -8,18 +8,18 @@ import (
 	"github.com/toophy/easybuff/proto"
 	"io/ioutil"
 	"os"
-	"runtime"
+	// "runtime"
 	"strings"
-	"sync"
+	// "sync"
 )
 
 // easybuff -s 描述文件目录 -d 目标文件目录 -l 语言(go,cpp)
-var g_Source = flag.String("s", "", "描述文件目录")
-var g_Target = flag.String("t", "", "目标文件目录")
+var g_Source = flag.String("s", "proto_desc", "描述文件目录")
+var g_Target = flag.String("t", "proto", "目标文件目录")
 var g_Language = flag.String("l", "go", "语言(go,cpp)")
 
-var g_CountMutex sync.Mutex
-var g_Count int
+// var g_CountMutex sync.Mutex
+// var g_Count int
 
 func main() {
 
@@ -48,41 +48,25 @@ func main() {
 	fl, _ := fs.RegSearchToList()
 
 	for _, key := range fl {
-		g_CountMutex.Lock()
-		g_Count++
-		g_CountMutex.Unlock()
 
-		go func(k string) {
-			file_path := source_dir + "/" + k
+		file_path := source_dir + "/" + key
 
-			fi, err := os.Open(file_path)
-			if err != nil {
-				fmt.Println("读文件失败: %s", err.Error())
-				return
-			}
-			fd, err := ioutil.ReadAll(fi)
-			fi.Close()
-
-			switch *g_Language {
-			case "go":
-				proto.ParseToNewGolang(string(fd), target_dir, k+".go")
-				// case "cpp":
-				// 	proto.ParseToCpplang(string(fd), target_dir, k+".cpp")
-			}
-			g_CountMutex.Lock()
-			g_Count--
-			g_CountMutex.Unlock()
-		}(key)
-	}
-
-	for {
-		g_CountMutex.Lock()
-		if g_Count == 0 {
-			g_CountMutex.Unlock()
-			break
+		fi, err := os.Open(file_path)
+		if err != nil {
+			fmt.Println("读文件失败: %s", err.Error())
+			return
 		}
-		g_CountMutex.Unlock()
-		//time.Sleep(300 * time.Millisecond)
-		runtime.Gosched()
+		fd, err := ioutil.ReadAll(fi)
+		fi.Close()
+
+		switch *g_Language {
+		case "go":
+			proto.ParseToNewGolang(string(fd), target_dir, key+".go")
+			// case "cpp":
+			// 	proto.ParseToCpplang(string(fd), target_dir, key+".cpp")
+		}
 	}
+
+	proto.WriteAllEpdGoCode()
+
 }
