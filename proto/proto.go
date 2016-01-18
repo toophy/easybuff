@@ -665,7 +665,6 @@ func writeStructs(file *os.File, table *EB_FileTable) {
 			// write
 			file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) bool {
 				defer RecoverWrite("%s")
-
 				`, d.Name, d.Name))
 
 			for _, v := range mbkeys {
@@ -848,11 +847,18 @@ func writeMessages(file *os.File, table *EB_FileTable) {
 			file.WriteString("\nreturn true\n}\n\n")
 
 			// write
-			file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) bool {
+			if strings.HasPrefix(d.Name, "S2G_") || strings.HasPrefix(d.Name, "G2S_") || strings.HasPrefix(d.Name, "S2C_") {
+				file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter, tgid uint64) bool {
 				defer RecoverWrite("%s")
-
+				p.SetsubTgid(tgid)
 				p.WriteMsgId(%s_Id)
 				`, d.Name, d.Name, d.Name))
+			} else {
+				file.WriteString(fmt.Sprintf(`func (t *%s) Write(p *PacketWriter) bool {
+				defer RecoverWrite("%s")
+				p.WriteMsgId(%s_Id)
+				`, d.Name, d.Name, d.Name))
+			}
 			// write len, msg_id
 			// old_pos := s.GetPos()
 			// s.Seek(old_pos+help.MsgHeaderSize)
