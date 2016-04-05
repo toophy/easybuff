@@ -62,11 +62,13 @@ func main() {
 		switch *g_Language {
 		case "go":
 			proto.ParseToNewGolang(string(fd), target_dir, key+".go")
+			proto.WriteAllEpdGoCode()
+		case "c#":
+			proto.ParseToNewGolang(string(fd), target_dir, key+".cs")
+			proto.WriteAllEpdCSharpCode()
 			// case "cpp":
 			// 	proto.ParseToCpplang(string(fd), target_dir, key+".cpp")
 		}
 	}
-
-	proto.WriteAllEpdGoCode()
 
 }
