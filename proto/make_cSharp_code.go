@@ -53,6 +53,22 @@ func TypeToCSharp(s string) string {
 	return type_name
 }
 
+// 线程日志 : 致命[F]级别日志
+func WriteCSharpString(file *os.File, level int, f string, v ...interface{}) {
+	switch level {
+	case 0:
+		file.WriteString(fmt.Sprintf(f, v...) + "\r\n")
+	case 1:
+		file.WriteString("    " + fmt.Sprintf(f, v...) + "\r\n")
+	case 2:
+		file.WriteString("        " + fmt.Sprintf(f, v...) + "\r\n")
+	case 3:
+		file.WriteString("            " + fmt.Sprintf(f, v...) + "\r\n")
+	default:
+		file.WriteString(fmt.Sprintf(f, v...) + "\r\n")
+	}
+}
+
 func WriteAllEpdCSharpCode() {
 	for _, v := range g_ParseTable.Files {
 		writeCSharpCode(v)
@@ -73,199 +89,14 @@ func writeIncludeCSharp(file *os.File, table *EB_FileTable) {
 
 	// 引用文件
 	// for _, key := range keys {
-	// 	file.WriteString(fmt.Sprintf("#include .\"%s\"\n", table.MyIncludeIdx[key].Name))
+	// 	file.WriteString(fmt.Sprintf("#include .\"%s\"", table.MyIncludeIdx[key].Name))
 	// }
-	file.WriteString("\n\n")
-}
-
-func writeStructsCSharp(file *os.File, table *EB_FileTable) {
-	file.WriteString("\n\n// ------ 普通结构\n")
-
-	keys := make([]int, len(table.MyStructIds))
-	i := 0
-	for key, _ := range table.MyStructIds {
-		keys[i] = key
-		i++
-	}
-
-	sort.Sort(sort.IntSlice(keys))
-
-	// 消息结构
-	for _, key := range keys {
-		struct_name := table.MyStructIds[key]
-
-		switch g_ParseTable.Cells[struct_name].(type) {
-		case *EB_Message:
-			d := g_ParseTable.Cells[struct_name].(*EB_Message)
-
-			for k, _ := range d.Comment {
-				if len(d.Comment[k]) > 0 {
-					file.WriteString(fmt.Sprintf("	// %s\n", d.Comment[k]))
-				}
-			}
-
-			file.WriteString(fmt.Sprintf("	class %s\n	{\n", d.Name))
-			// 循环, 顺序输出
-			// 按照字母顺序
-			mbkeys := make([]string, len(d.Members))
-			for k, _ := range d.Members {
-				mbkeys[d.Members[k].Sort] = k
-			}
-
-			for _, v := range mbkeys {
-				m := d.Members[v]
-				if len(m.Range) <= 0 {
-					file.WriteString(fmt.Sprintf("		public %s %s; // %s\n", TypeToCSharp(m.Type), m.Name, m.Desc))
-				} else {
-					file.WriteString(fmt.Sprintf("		public %s[] %s; // %s\n", TypeToCSharp(m.Type), m.Name, m.Desc))
-				}
-			}
-
-			file.WriteString("\n")
-
-			// read
-			file.WriteString("		public void Read(ref PacketReader p)\n		{\n")
-
-			for _, v := range mbkeys {
-				m := d.Members[v]
-				fn := GetReadFunc(m.Type)
-				if fn == "" {
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			%s.Read(ref p);\n", m.Name))
-					} else {
-						file.WriteString(fmt.Sprintf("			int len_%s = int(p.%s());\n"+
-							"			for (int i=0;i<len_%s;++i)\n"+
-							"			{\n"+
-							"				%s[i].Read(ref p);\n"+
-							"			}\n", m.Name, GetReadFunc("uint8"), m.Name, m.Name))
-					}
-				} else if m.Type == "string" {
-
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			p.%s(ref %s);\n", fn, m.Name))
-					} else {
-						if m.Range == "--ArrayLen" {
-							// 自动范围
-							file.WriteString(fmt.Sprintf("			p.%s(uint8(%s.Lenght));\n"+
-								"			for (int i=;i<%s.Lenght;++i)\n"+
-								"			{\n"+
-								"				p.%s(ref %s[i]);\n"+
-								"			}\n", GetReadFunc("uint8"), m.Name, m.Name, fn, m.Name))
-						} else {
-							// 枚举
-							file.WriteString(fmt.Sprintf("			int len_%s = int(p.%s());\n"+
-								"			for (int i=0; i<%s && i<len_%s; ++i)\n"+
-								"			{\n"+
-								"				%s(ref %s[i]);\n"+
-								"			}\n", m.Name, GetReadFunc("uint8"), m.Range, m.Name, fn, m.Name))
-						}
-					}
-				} else {
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			%s = p.%s();\n", m.Name, fn))
-					} else {
-						file.WriteString(fmt.Sprintf("			int len_%s = int(p.%s());\n"+
-							"			for (int i=0;i<len_%s;++i)\n"+
-							"			{\n"+
-							"				%s = p.%s();\n"+
-							"			}\n", m.Name, GetReadFunc("uint8"), m.Name, m.Name, fn))
-					}
-				}
-			}
-
-			file.WriteString("		}\n\n")
-
-			// write
-			file.WriteString("		public void Write(ref PacketWriter p)\n		{\n")
-
-			for _, v := range mbkeys {
-				m := d.Members[v]
-				fn := GetWriteFunc(m.Type)
-				if fn == "" {
-
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			%s.Write(ref p);\n", m.Name))
-					} else {
-						if m.Range == "--ArrayLen" {
-							// 自动范围
-							file.WriteString(fmt.Sprintf("			p.%s(byte(%s.Lenght));\n"+
-								"			for (int i=0;i<%s.Lenght;++i)\n"+
-								"			{\n"+
-								"				%s[k].Write(ref p);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
-
-						} else {
-							// 枚举
-							file.WriteString(fmt.Sprintf("			p.%s(byte(%s));\n"+
-								"			int len_%s = %s.Lenght;\n"+
-								"			for (int i=0; i<%s && i<len_%s; i++)\n"+
-								"			{\n"+
-								"				%s[i].Write(ref p);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, m.Name))
-						}
-					}
-				} else if m.Type == "string" {
-
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			p.%s(ref %s);\n", fn, m.Name))
-					} else {
-						if m.Range == "--ArrayLen" {
-							// 自动范围
-							file.WriteString(fmt.Sprintf("			p.%s(uint8(%s.Lenght));\n"+
-								"			for (int i=0;i<%s.Lenght;++i)\n"+
-								"			{\n"+
-								"				p.%s(ref %s[i]);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
-
-						} else {
-							// 枚举
-							file.WriteString(fmt.Sprintf("			p.%s(uint8(%s));\n"+
-								"			int len_%s = %s.Lenght;\n"+
-								"			for (int i=0; i<%s && i<len_%s; i++)\n"+
-								"			{\n"+
-								"				p.%s(ref %s[i]);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
-						}
-					}
-				} else {
-					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf("			p.%s(%s);\n", fn, m.Name))
-					} else {
-						if m.Range == "--ArrayLen" {
-							// 自动范围
-							file.WriteString(fmt.Sprintf("			p.%s(uint8(%s.Lenght));\n"+
-								"			for(int i=0;i<%s.Lenght;++i)\n"+
-								"			{\n"+
-								"				p.%s(%s[i]);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
-
-						} else {
-							// 枚举
-							file.WriteString(fmt.Sprintf("			p.%s(uint8(%s));\n"+
-								"			int len_%s = %s.Lenght;\n"+
-								"			for (int i=0; i<%s && i<len_%s; i++)\n"+
-								"			{\n"+
-								"				p.%s(%s[i]);\n"+
-								"			}\n", GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
-						}
-					}
-				}
-			}
-
-			// write over
-			file.WriteString("		}\n")
-
-			// class over
-			file.WriteString("	}\n")
-		}
-	}
-
-	file.WriteString("\n\n")
+	WriteCSharpString(file, 0, "")
 }
 
 func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 
-	file.WriteString("\n\n// ------ 消息结构\n")
+	WriteCSharpString(file, 1, "// ------ 消息结构")
 
 	// 按照字母顺序
 	keys := make([]int, len(table.MyMsgIds))
@@ -286,14 +117,15 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 
 			for k, _ := range d.Comment {
 				if len(d.Comment[k]) > 0 {
-					file.WriteString(fmt.Sprintf("// %s\n", d.Comment[k]))
+					WriteCSharpString(file, 1, "// %s", d.Comment[k])
 				}
 			}
 
-			file.WriteString(fmt.Sprintf("class %s \n{\n", d.Name))
+			WriteCSharpString(file, 1, "class %s", d.Name)
+			WriteCSharpString(file, 1, "{")
 
 			if d.MsgId > 0 {
-				file.WriteString(fmt.Sprintf("public const ushort %s_Id = %d;\n\n", d.Name, d.MsgId))
+				WriteCSharpString(file, 2, "public const ushort %s_Id = %d;", d.Name, d.MsgId)
 			} else {
 				panic(fmt.Sprintf("文件格式错误 : message [%s]的ID(%d)非法", d.Name, d.MsgId))
 			}
@@ -308,175 +140,150 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				if len(m.Range) <= 0 {
-					file.WriteString(fmt.Sprintf("public %s %s; // %s\n", TypeToCSharp(m.Type), m.Name, m.Desc))
+					WriteCSharpString(file, 2, "public %s %s; // %s", TypeToCSharp(m.Type), m.Name, m.Desc)
 				} else {
-					file.WriteString(fmt.Sprintf("public %s[] %s; // %s\n", TypeToCSharp(m.Type), m.Name, m.Desc))
+					WriteCSharpString(file, 2, "public %s[] %s; // %s", TypeToCSharp(m.Type), m.Name, m.Desc)
 				}
 			}
 
-			file.WriteString("\n")
+			WriteCSharpString(file, 0, "")
 			// read
-			file.WriteString("public void Read(ref PacketReader p)\n{\n")
+			WriteCSharpString(file, 2, "public void Read(ref PacketReader p)")
+			WriteCSharpString(file, 2, "{")
 
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				fn := GetReadFunc(m.Type)
 				if fn == "" {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" %s.Read(ref p);\n", m.Name))
+						WriteCSharpString(file, 3, "%s.Read(ref p);", m.Name)
 					} else {
-						file.WriteString(fmt.Sprintf(`
-													  int len_%s = int(p.%s());
-													  for (int i=0;i<len_%s;++i) {
-													  	%s[i].Read(ref p);
-													  }
-													  `, m.Name, GetReadFunc("uint8"), m.Name, m.Name))
+						WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+						WriteCSharpString(file, 3, "for (int i=0;i<len_%s;++i)", m.Name)
+						WriteCSharpString(file, 3, "{")
+						WriteCSharpString(file, 4, "%s[i].Read(ref p);", m.Name)
+						WriteCSharpString(file, 3, "}")
 					}
 				} else if m.Type == "string" {
 
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" p.%s(ref %s);\n", fn, m.Name))
+						WriteCSharpString(file, 3, "p.%s(ref %s);", fn, m.Name)
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s.Lenght));
-														  for (int i=;i<%s.Lenght;++i) {
-														  	p.%s(ref %s[i]);
-														  }
-														  `, GetReadFunc("uint8"), m.Name, m.Name, fn, m.Name))
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetReadFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "p.%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 						} else {
 							// 枚举
-							file.WriteString(fmt.Sprintf(`
-														  int len_%s = int(p.%s());
-														  for (int i=0; i<%s && i<len_%s; ++i) {
-														  	%s(ref %s[i]);
-														  }
-														  `, m.Name, GetReadFunc("uint8"), m.Range, m.Name, fn, m.Name))
+							WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; ++i)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 						}
 					}
 				} else {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" %s = p.%s();\n", m.Name, fn))
+						WriteCSharpString(file, 3, "%s = p.%s();", m.Name, fn)
 					} else {
-						file.WriteString(fmt.Sprintf(`
-													  int len_%s = int(p.%s());
-													  for (int i=0;i<len_%s;++i) {
-													  	 %s = p.%s();
-													  }
-													  `, m.Name, GetReadFunc("uint8"), m.Name, m.Name, fn))
+						WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+						WriteCSharpString(file, 3, "for (int i=0;i<len_%s;++i)", m.Name)
+						WriteCSharpString(file, 3, "{")
+						WriteCSharpString(file, 3, "%s = p.%s();", m.Name, fn)
+						WriteCSharpString(file, 3, "}")
 					}
 				}
 			}
 
-			file.WriteString("}\n\n")
+			WriteCSharpString(file, 2, "}")
 
 			// write
 			if strings.HasPrefix(d.Name, "S2G_") || strings.HasPrefix(d.Name, "G2S_") || strings.HasPrefix(d.Name, "S2C_") {
-				file.WriteString(fmt.Sprintf(`public void Write(ref PacketWriter p, long tgid)
-				{
-					p.SetsubTgid(tgid);
-					p.WriteMsgId(%s_Id);
-				`, d.Name))
+				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p, long tgid)")
+				WriteCSharpString(file, 2, "{")
+				WriteCSharpString(file, 3, "p.SetsubTgid(tgid);")
+				WriteCSharpString(file, 3, "p.WriteMsgId(%s_Id);", d.Name)
 			} else {
-				file.WriteString(fmt.Sprintf(`public void Write(ref PacketWriter p)
-				{
-					p.WriteMsgId(%s_Id);
-				`, d.Name))
+				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p)")
+				WriteCSharpString(file, 2, "{")
+				WriteCSharpString(file, 3, "p.WriteMsgId(%s_Id);", d.Name)
 			}
-			// write len, msg_id
-			// old_pos := s.GetPos()
-			// s.Seek(old_pos+help.MsgHeaderSize)
-			// ...
-			// last_pos := s.GetPos()
-			// s.Seek(old_pos)
-			// header := len<<16 | uint32(x_Id)
-			// s.WriteUint32(header)
-			// s.Seek(last_pos)
+
 			for _, v := range mbkeys {
 				m := d.Members[v]
 				fn := GetWriteFunc(m.Type)
 				if fn == "" {
 
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" %s.Write(ref p);\n", m.Name))
+						WriteCSharpString(file, 3, "%s.Write(ref p);", m.Name)
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s.Lenght));
-														  for (int i=;i<%s.Lenght;++i) {
-														  	%s[k].Write(ref p);
-														  }
-														  `, GetWriteFunc("uint8"), m.Name, m.Name, m.Name))
-
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s[k].Write(ref p);", m.Name)
+							WriteCSharpString(file, 3, "}")
 						} else {
 							// 枚举
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s));
-														  int len_%s = %s.Lenght;
-														  for (int i=0; i<%s && i<len_%s; ++i) {
-														  	%s[i].Write(ref p);
-														  }
-														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, m.Name))
+							WriteCSharpString(file, 3, "p.%s(uint8(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; ++i)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s[i].Write(ref p);", m.Name)
+							WriteCSharpString(file, 3, "}")
 						}
 					}
 				} else if m.Type == "string" {
 
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" p.%s(ref %s);\n", fn, m.Name))
+						WriteCSharpString(file, 3, "p.%s(ref %s);", fn, m.Name)
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s.Lenght));
-														  for (int i=;i<%s.Lenght;++i) {
-														  	p.%s(ref %s[i]);
-														  }
-														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
-
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=;i<%s.Lenght;++i) {", m.Name)
+							WriteCSharpString(file, 4, "p.%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 						} else {
 							// 枚举
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s));
-														  int len_%s = %s.Lenght;
-														  for (int i=0; i<%s && i<len_%s; ++i) {
-														  	%s(ref %s[i]);
-														  }
-														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
+							WriteCSharpString(file, 3, "p.%s(uint8(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; ++i) {", m.Range, m.Name)
+							WriteCSharpString(file, 4, "%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 						}
 					}
 				} else {
 					if len(m.Range) <= 0 {
-						file.WriteString(fmt.Sprintf(" p.%s(%s);\n", fn, m.Name))
+						WriteCSharpString(file, 3, "p.%s(%s);", fn, m.Name)
 					} else {
 						if m.Range == "--ArrayLen" {
 							// 自动范围
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s.Lenght));
-														  for (int i=0;i<%s.Lenght;++i) {
-														  	p.%s(%s[i]);
-														  }
-														  `, GetWriteFunc("uint8"), m.Name, m.Name, fn, m.Name))
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=0;i<%s.Lenght;++i) {", m.Name)
+							WriteCSharpString(file, 4, "p.%s(%s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 
 						} else {
 							// 枚举
-							file.WriteString(fmt.Sprintf(`
-														  p.%s(uint8(%s));
-														  int len_%s = %s.Lenght;
-														  for (int i=0; i<%s && i<len_%s; ++i) {
-														  	p.%s(%s[i]);
-														  }
-														  `, GetWriteFunc("uint8"), m.Range, m.Name, m.Name, m.Range, m.Name, fn, m.Name))
+							WriteCSharpString(file, 3, "p.%s(uint8(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; ++i) {", m.Range, m.Name)
+							WriteCSharpString(file, 4, "p.%s(%s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
 						}
 					}
 				}
 			}
 
 			// write over
-			file.WriteString("p.WriteMsgOver();\n}\n")
-
-			file.WriteString("}\n")
+			WriteCSharpString(file, 3, "p.WriteMsgOver();")
+			WriteCSharpString(file, 2, "}")
+			WriteCSharpString(file, 1, "}")
 		}
 	}
 }
@@ -497,11 +304,12 @@ func writeCSharpCode(table *EB_FileTable) {
 		panic(err.Error())
 	}
 	// 文件头
-	file.WriteString("// easybuff\n" +
-		"// 不要修改本文件, 每次消息有变动, 请手动生成本文件\n" +
-		"// easybuff -s 描述文件目录 -o 目标文件目录 -l 语言(go,cpp,c#)\n" +
-		"using NetMsg;\n" +
-		"using System;\n")
+	WriteCSharpString(file, 0, "// easybuff")
+	WriteCSharpString(file, 0, "// 不要修改本文件, 每次消息有变动, 请手动生成本文件")
+	WriteCSharpString(file, 0, "// easybuff -s 描述文件目录 -o 目标文件目录 -l 语言(go,cpp,c#)")
+	WriteCSharpString(file, 0, "")
+	WriteCSharpString(file, 0, "using NetMsg;")
+	WriteCSharpString(file, 0, "using System;")
 
 	// 按照字母顺序
 	keys := make([]int, len(table.MyMsgIds))
@@ -517,10 +325,11 @@ func writeCSharpCode(table *EB_FileTable) {
 	writeIncludeCSharp(file, table)
 
 	// 文件头
-	file.WriteString("namespace NetMsg\n{\n")
+	WriteCSharpString(file, 0, "namespace NetMsg")
+	WriteCSharpString(file, 0, "{")
 
 	// 枚举
-	file.WriteString("// ------ 枚举\n")
+	WriteCSharpString(file, 1, "// ------ 枚举")
 	// for _, key := range keys {
 	// 	msg_name := table.MyMsgIds[key]
 
@@ -537,9 +346,9 @@ func writeCSharpCode(table *EB_FileTable) {
 	// 			}
 	// 		}
 	// 		if len(comment_string) > 0 {
-	// 			file.WriteString(fmt.Sprintf("static int %s = %s; // %s\n", d.Name, d.Value, comment_string))
+	// 			file.WriteString(fmt.Sprintf("static int %s = %s; // %s", d.Name, d.Value, comment_string))
 	// 		} else {
-	// 			file.WriteString(fmt.Sprintf("static int %s = %s;\n", d.Name, d.Value))
+	// 			file.WriteString(fmt.Sprintf("static int %s = %s;", d.Name, d.Value))
 	// 		}
 	// 	}
 	// }
@@ -550,7 +359,7 @@ func writeCSharpCode(table *EB_FileTable) {
 	// 消息结构
 	writeMessagesCSharp(file, table)
 
-	file.WriteString("}\n\n")
+	WriteCSharpString(file, 0, "}")
 
 	file.Close()
 
@@ -559,4 +368,191 @@ func writeCSharpCode(table *EB_FileTable) {
 	// if err != nil {
 	// 	fmt.Println(target_file + "," + err.Error())
 	// }
+}
+
+func writeStructsCSharp(file *os.File, table *EB_FileTable) {
+	WriteCSharpString(file, 1, "// ------ 普通结构")
+
+	keys := make([]int, len(table.MyStructIds))
+	i := 0
+	for key, _ := range table.MyStructIds {
+		keys[i] = key
+		i++
+	}
+
+	sort.Sort(sort.IntSlice(keys))
+
+	// 消息结构
+	for _, key := range keys {
+		struct_name := table.MyStructIds[key]
+
+		switch g_ParseTable.Cells[struct_name].(type) {
+		case *EB_Message:
+			d := g_ParseTable.Cells[struct_name].(*EB_Message)
+
+			for k, _ := range d.Comment {
+				if len(d.Comment[k]) > 0 {
+					WriteCSharpString(file, 1, "// %s", d.Comment[k])
+				}
+			}
+
+			WriteCSharpString(file, 1, "class %s", d.Name)
+			WriteCSharpString(file, 1, "{")
+
+			// 循环, 顺序输出
+			// 按照字母顺序
+			mbkeys := make([]string, len(d.Members))
+			for k, _ := range d.Members {
+				mbkeys[d.Members[k].Sort] = k
+			}
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				if len(m.Range) <= 0 {
+					WriteCSharpString(file, 2, "public %s %s; // %s", TypeToCSharp(m.Type), m.Name, m.Desc)
+				} else {
+					WriteCSharpString(file, 2, "public %s[] %s; // %s", TypeToCSharp(m.Type), m.Name, m.Desc)
+				}
+			}
+
+			// read
+			WriteCSharpString(file, 2, "public void Read(ref PacketReader p)")
+			WriteCSharpString(file, 2, "{")
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetReadFunc(m.Type)
+				if fn == "" {
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "%s.Read(ref p);", m.Name)
+					} else {
+						WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+						WriteCSharpString(file, 3, "for (int i=0;i<len_%s;++i)", m.Name)
+						WriteCSharpString(file, 3, "{")
+						WriteCSharpString(file, 4, "%s[i].Read(ref p);", m.Name)
+						WriteCSharpString(file, 3, "}")
+					}
+				} else if m.Type == "string" {
+
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "p.%s(ref %s);", fn, m.Name)
+					} else {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetReadFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "p.%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+						} else {
+							// 枚举
+							WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; ++i)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+						}
+					}
+				} else {
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "%s = p.%s();", m.Name, fn)
+					} else {
+						WriteCSharpString(file, 3, "int len_%s = int(p.%s());", m.Name, GetReadFunc("uint8"))
+						WriteCSharpString(file, 3, "for (int i=0;i<len_%s;++i)", m.Name)
+						WriteCSharpString(file, 3, "{")
+						WriteCSharpString(file, 4, "%s = p.%s();", m.Name, fn)
+						WriteCSharpString(file, 3, "}")
+					}
+				}
+			}
+
+			WriteCSharpString(file, 2, "}")
+
+			// write
+			WriteCSharpString(file, 2, "public void Write(ref PacketWriter p)")
+			WriteCSharpString(file, 2, "{")
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetWriteFunc(m.Type)
+				if fn == "" {
+
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "%s.Write(ref p);", m.Name)
+					} else {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							WriteCSharpString(file, 3, "p.%s(byte(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=0;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s[k].Write(ref p);", m.Name)
+							WriteCSharpString(file, 3, "}")
+
+						} else {
+							// 枚举
+							WriteCSharpString(file, 3, "p.%s(byte(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; i++)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "%s[i].Write(ref p);", m.Name)
+							WriteCSharpString(file, 3, "}")
+						}
+					}
+				} else if m.Type == "string" {
+
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "p.%s(ref %s);", fn, m.Name)
+					} else {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for (int i=0;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "p.%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+
+						} else {
+							// 枚举
+							WriteCSharpString(file, 3, "p.%s(uint8(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; i++)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "p.%s(ref %s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+						}
+					}
+				} else {
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "p.%s(%s);", fn, m.Name)
+					} else {
+						if m.Range == "--ArrayLen" {
+							// 自动范围
+							WriteCSharpString(file, 3, "p.%s(uint8(%s.Lenght));", GetWriteFunc("uint8"), m.Name)
+							WriteCSharpString(file, 3, "for(int i=0;i<%s.Lenght;++i)", m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 4, "p.%s(%s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+
+						} else {
+							// 枚举
+							WriteCSharpString(file, 3, "p.%s(uint8(%s));", GetWriteFunc("uint8"), m.Range)
+							WriteCSharpString(file, 3, "int len_%s = %s.Lenght;", m.Name, m.Name)
+							WriteCSharpString(file, 3, "for (int i=0; i<%s && i<len_%s; i++)", m.Range, m.Name)
+							WriteCSharpString(file, 3, "{")
+							WriteCSharpString(file, 3, "p.%s(%s[i]);", fn, m.Name)
+							WriteCSharpString(file, 3, "}")
+						}
+					}
+				}
+			}
+
+			// write over
+			WriteCSharpString(file, 2, "}")
+
+			// class over
+			WriteCSharpString(file, 1, "}")
+		}
+	}
+
+	WriteCSharpString(file, 0, "")
 }
