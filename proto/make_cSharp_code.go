@@ -147,6 +147,25 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 			}
 
 			WriteCSharpString(file, 0, "")
+
+			// 构造
+			WriteCSharpString(file, 2, "public %s()", d.Name)
+			WriteCSharpString(file, 2, "{")
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetReadFunc(m.Type)
+				if fn == "" {
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "%s = new %s();", m.Name, m.Type)
+					} else {
+						WriteCSharpString(file, 3, "%s = new %s[%s];", m.Name, m.Type, m.Range)
+					}
+				}
+			}
+
+			WriteCSharpString(file, 2, "}")
+
 			// read
 			WriteCSharpString(file, 2, "public void Read(ref PacketReader p)")
 			WriteCSharpString(file, 2, "{")
@@ -204,7 +223,6 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 			if strings.HasPrefix(d.Name, "S2G_") || strings.HasPrefix(d.Name, "G2S_") || strings.HasPrefix(d.Name, "S2C_") {
 				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p, long tgid)")
 				WriteCSharpString(file, 2, "{")
-				WriteCSharpString(file, 3, "p.SetsubTgid(tgid);")
 				WriteCSharpString(file, 3, "p.WriteMsgId(%s_Id);", d.Name)
 			} else {
 				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p)")
@@ -414,6 +432,24 @@ func writeStructsCSharp(file *os.File, table *EB_FileTable) {
 					WriteCSharpString(file, 2, "public %s[] %s; // %s", TypeToCSharp(m.Type), m.Name, m.Desc)
 				}
 			}
+
+			// 构造
+			WriteCSharpString(file, 2, "public %s()", d.Name)
+			WriteCSharpString(file, 2, "{")
+
+			for _, v := range mbkeys {
+				m := d.Members[v]
+				fn := GetReadFunc(m.Type)
+				if fn == "" {
+					if len(m.Range) <= 0 {
+						WriteCSharpString(file, 3, "%s = new %s();", m.Name, m.Type)
+					} else {
+						WriteCSharpString(file, 3, "%s = new %s[%s];", m.Name, m.Type, m.Range)
+					}
+				}
+			}
+
+			WriteCSharpString(file, 2, "}")
 
 			// read
 			WriteCSharpString(file, 2, "public void Read(ref PacketReader p)")
