@@ -8,9 +8,7 @@ import (
 	"github.com/toophy/easybuff/proto"
 	"io/ioutil"
 	"os"
-	// "runtime"
 	"strings"
-	// "sync"
 )
 
 // easybuff -s 描述文件目录 -d 目标文件目录 -l 语言(go,cpp)

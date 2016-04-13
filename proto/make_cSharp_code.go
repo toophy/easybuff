@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/toophy/easybuff/help"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -94,7 +95,7 @@ func writeIncludeCSharp(file *os.File, table *EB_FileTable) {
 	WriteCSharpString(file, 0, "")
 }
 
-func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
+func writeMessagesCSharp(file *os.File, table *EB_FileTable, msgEnum string) {
 
 	WriteCSharpString(file, 1, "// ------ 消息结构")
 
@@ -124,11 +125,11 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 			WriteCSharpString(file, 1, "class %s", d.Name)
 			WriteCSharpString(file, 1, "{")
 
-			if d.MsgId > 0 {
-				WriteCSharpString(file, 2, "public const ushort %s_Id = %d;", d.Name, d.MsgId)
-			} else {
-				panic(fmt.Sprintf("文件格式错误 : message [%s]的ID(%d)非法", d.Name, d.MsgId))
-			}
+			// if d.MsgId > 0 {
+			// 	WriteCSharpString(file, 2, "public const ushort %s_Id = %d;", d.Name, d.MsgId)
+			// } else {
+			// 	panic(fmt.Sprintf("文件格式错误 : message [%s]的ID(%d)非法", d.Name, d.MsgId))
+			// }
 
 			// 循环, 顺序输出
 			// 按照字母顺序
@@ -223,11 +224,11 @@ func writeMessagesCSharp(file *os.File, table *EB_FileTable) {
 			if strings.HasPrefix(d.Name, "S2G_") || strings.HasPrefix(d.Name, "G2S_") || strings.HasPrefix(d.Name, "S2C_") {
 				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p, long tgid)")
 				WriteCSharpString(file, 2, "{")
-				WriteCSharpString(file, 3, "p.WriteMsgId(%s_Id);", d.Name)
+				WriteCSharpString(file, 3, "p.WriteMsgId((ushort)%s.%s_Id);", msgEnum, d.Name)
 			} else {
 				WriteCSharpString(file, 2, "public void Write(ref PacketWriter p)")
 				WriteCSharpString(file, 2, "{")
-				WriteCSharpString(file, 3, "p.WriteMsgId(%s_Id);", d.Name)
+				WriteCSharpString(file, 3, "p.WriteMsgId((ushort)%s.%s_Id);", msgEnum, d.Name)
 			}
 
 			for _, v := range mbkeys {
@@ -321,6 +322,11 @@ func writeCSharpCode(table *EB_FileTable) {
 	if err != nil {
 		panic(err.Error())
 	}
+
+	// 文件名标志
+	reg := regexp.MustCompile(`[^/.]+`)
+	file_flag := reg.FindString(table.FileName)
+
 	// 文件头
 	WriteCSharpString(file, 0, "// easybuff")
 	WriteCSharpString(file, 0, "// 不要修改本文件, 每次消息有变动, 请手动生成本文件")
@@ -371,11 +377,48 @@ func writeCSharpCode(table *EB_FileTable) {
 	// 	}
 	// }
 
+	// 消息ID
+	WriteCSharpString(file, 1, "// ------ 消息ID")
+	WriteCSharpString(file, 1, fmt.Sprintf("enum MsgId_%s", file_flag))
+	WriteCSharpString(file, 1, fmt.Sprintf("{"))
+
+	for _, key := range keys {
+		msg_name := table.MyMsgIds[key]
+
+		switch g_ParseTable.Cells[msg_name].(type) {
+		case *EB_Message:
+			d := g_ParseTable.Cells[msg_name].(*EB_Message)
+
+			comment_string := ""
+			for k, _ := range d.Comment {
+				if len(d.Comment[k]) > 0 {
+					if len(comment_string) > 0 {
+						comment_string += ", "
+					}
+					comment_string += d.Comment[k]
+				}
+			}
+
+			if d.MsgId > 0 {
+				if len(comment_string) > 0 {
+					WriteCSharpString(file, 2, fmt.Sprintf("%s_Id = %d, // %s", d.Name, d.MsgId, comment_string))
+				} else {
+					WriteCSharpString(file, 2, fmt.Sprintf("%s_Id = %d,", d.Name, d.MsgId))
+				}
+
+			} else {
+				panic(fmt.Sprintf("文件格式错误 : message [%s]的ID(%d)非法", d.Name, d.MsgId))
+			}
+		}
+	}
+
+	WriteCSharpString(file, 1, fmt.Sprintf("}"))
+
 	// 普通结构
 	writeStructsCSharp(file, table)
 
 	// 消息结构
-	writeMessagesCSharp(file, table)
+	writeMessagesCSharp(file, table, fmt.Sprintf("MsgId_%s", file_flag))
 
 	WriteCSharpString(file, 0, "}")
 
